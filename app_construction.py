@@ -464,22 +464,45 @@ with tab4:
         if st.button("📨 세무사 전송", use_container_width=True):
             st.success("세무사님께 자료 전송 완료!")
 
-# 하단 메뉴
+# ============================================
+# 하단 상태바
+# ============================================
 st.divider()
-col1, col2, col3, col4 = st.columns(4)
 
-with col1:
-    if st.button("📞 고객센터", use_container_width=True):
-        st.info("☎️ 1588-0000")
+# 한 줄로 모든 정보 표시
+footer_cols = st.columns([4, 1, 1, 1])
 
-with col2:
-    if st.button("📚 사용법", use_container_width=True):
-        st.info("동영상 가이드 준비중")
+with footer_cols[0]:
+    # 세션 정보
+    if st.session_state.get('authenticated'):
+        from datetime import datetime, timedelta
+        
+        # 사용자 및 시간 정보
+        user = st.session_state.get('username', 'guest')
+        
+        # 남은 시간 계산
+        remaining_minutes = 30
+        if st.session_state.get('login_time'):
+            elapsed = (datetime.now() - st.session_state.login_time).seconds // 60
+            remaining_minutes = max(0, 30 - elapsed)
+        
+        # 사용량 정보
+        usage, limits = validate_api_usage()
+        
+        st.caption(
+            f"👤 {user} | "
+            f"⏱️ {remaining_minutes}분 | "
+            f"📊 AI {usage['gpt_calls']}/{limits['gpt_calls']} | "
+            f"🎤 음성 {usage['whisper_calls']}/{limits['whisper_calls']}"
+        )
 
-with col3:
-    if st.button("👥 내 정보", use_container_width=True):
-        st.info("사업자 정보 관리")
+with footer_cols[1]:
+    st.button("📞 지원", use_container_width=True)
 
-with col4:
-    if st.button("⚙️ 설정", use_container_width=True):
-        st.info("알림 설정")
+with footer_cols[2]:
+    st.button("⚙️ 설정", use_container_width=True)
+
+with footer_cols[3]:
+    if st.button("🚪 로그아웃", use_container_width=True):
+        st.session_state.clear()
+        st.rerun()
