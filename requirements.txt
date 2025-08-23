@@ -4,3 +4,4 @@ plotly
 pillow
 requests
 openai
+audio-recorder-streamlit
