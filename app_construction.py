@@ -161,7 +161,7 @@ with tab1:
                 st.audio(audio_bytes, format="audio/wav")
                 
                 if st.button("🤖 AI 인식", type="primary"):
-                    # API 제한 체크
+                    # 🔐 API 제한 체크
                     if not check_api_limit("whisper_calls"):
                         st.stop()
                     
@@ -195,8 +195,8 @@ with tab1:
                             st.session_state.recognized_text = transcript.text
                             st.success("✅ 인식 완료!")
                             
-                            # 로깅
-                            log_activity("voice_recognition", {"success": True})
+                            # 🔐 활동 로깅
+                            log_activity("voice_recognition", {"success": True, "text_length": len(transcript.text)})
                             
                         except Exception as e:
                             st.error(f"인식 실패: {e}")
@@ -244,7 +244,7 @@ with tab1:
         if not user_input or not user_input.strip():
             st.warning("내용을 입력해주세요.")
         else:
-            # API 제한 체크
+            # 🔐 API 제한 체크
             if not check_api_limit("gpt_calls"):
                 st.stop()
             
@@ -265,12 +265,91 @@ with tab1:
                     st.session_state.analyzed_data = normalized
                     st.session_state.saved = False
                     
-                    # 로깅
+                    # 🔐 활동 로깅
                     log_activity("text_analysis", {"success": True, "text_length": len(user_input)})
                     
                 except Exception as e:
                     st.error(f"처리 실패: {e}")
                     log_activity("text_analysis", {"success": False, "error": str(e)})
+
+    # 분석 결과 표시
+    if st.session_state.analyzed_data:
+        st.divider()
+        st.subheader("📝 AI 분석 결과")
+        
+        data = st.session_state.analyzed_data
+        
+        if data:
+            col1, col2 = st.columns([2, 1])
+            
+            with col1:
+                # 분석 결과 카드
+                st.markdown("### 📋 내용 정리")
+                
+                with st.container():
+                    st.markdown(f"""
+                    - **🏗️ 현장:** {data.get('who', '-')}
+                    - **📋 내용:** {data.get('what', '-')}  
+                    - **💰 금액:** {data.get('display_amount', '-')}
+                    - **📅 언제:** {data.get('when', '-')}
+                    - **📍 위치:** {data.get('where', '-')}
+                    - **❓ 어떻게:** {data.get('how', '-')}
+                    - **💡 왜:** {data.get('why', '-')}
+                    """)
+                
+                # 수정 가능한 필드들
+                with st.expander("✏️ 수정하기"):
+                    data['who'] = st.text_input("현장명", data.get('who', ''))
+                    data['what'] = st.text_input("작업 내용", data.get('what', ''))
+                    data['when'] = st.text_input("날짜", data.get('when', ''))
+                    data['where'] = st.text_input("위치", data.get('where', ''))
+            
+            with col2:
+                st.markdown("### 💾 저장")
+                
+                if not st.session_state.saved:
+                    col1, col2 = st.columns([2, 1])
+                    with col1:
+                        if st.button("💾 확정 저장", type="primary", use_container_width=True):
+                            # 🔐 API 제한 체크
+                            if not check_api_limit("notion_saves"):
+                                st.stop()
+                                
+                            with st.spinner("저장 중..."):
+                                try:
+                                    result = save_record(data)
+                                    if result:
+                                        st.success("✅ 저장 완료!")
+                                        st.session_state.saved = True
+                                        
+                                        # 🔐 활동 로깅
+                                        log_activity("notion_save", {"success": True, "site": data.get('who')})
+                                        
+                                        # 세션 정리
+                                        if 'analyzed_data' in st.session_state:
+                                            del st.session_state.analyzed_data
+                                        if 'recognized_text' in st.session_state:
+                                            del st.session_state.recognized_text
+                                    else:
+                                        st.error("❌ 저장 실패")
+                                        log_activity("notion_save", {"success": False})
+                                except Exception as e:
+                                    st.error(f"저장 실패: {e}")
+                                    log_activity("notion_save", {"success": False, "error": str(e)})
+                    
+                    with col2:
+                        if st.button("🗑️ 취소", use_container_width=True):
+                            st.session_state.analyzed_data = None
+                            st.rerun()
+                else:
+                    st.success("✅ 저장됨")
+                    if st.button("🔄 새로 기록", use_container_width=True):
+                        st.session_state.analyzed_data = None
+                        st.session_state.saved = False
+                        if 'recognized_text' in st.session_state:
+                            del st.session_state.recognized_text
+                        st.rerun()
+
 # Tab 2: 영수증 OCR
 with tab2:
     st.subheader("영수증 촬영 & 자동 인식")
@@ -314,6 +393,10 @@ with tab2:
             site = st.text_input("현장명", placeholder="예: 강남 오피스텔")
             
             if st.button("💾 저장하기", type="primary"):
+                # 🔐 API 제한 체크
+                if not check_api_limit("notion_saves"):
+                    st.stop()
+                    
                 # LLM으로 영수증 텍스트 구조화
                 with st.spinner("저장 중..."):
                     try:
@@ -325,10 +408,14 @@ with tab2:
                         
                         if 200 <= status < 300:
                             st.success(f"✅ '{category}' 영수증이 저장되었습니다!")
+                            # 🔐 활동 로깅
+                            log_activity("receipt_save", {"success": True, "category": category})
                         else:
                             st.error("저장 실패")
+                            log_activity("receipt_save", {"success": False})
                     except Exception as e:
                         st.error(f"처리 실패: {e}")
+                        log_activity("receipt_save", {"success": False, "error": str(e)})
 
 # Tab 3: 현황 대시보드
 with tab3:
