@@ -1,10 +1,21 @@
 import os
 import requests
-from dotenv import load_dotenv
 
-load_dotenv()
-NOTION_API_KEY = os.getenv("NOTION_API_KEY")
-NOTION_DB_ID = os.getenv("NOTION_DB_ID")
+# Streamlit Cloud 호환
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # Streamlit Cloud에서는 secrets 사용
+
+# 환경변수 가져오기 (Streamlit Cloud와 로컬 모두 지원)
+try:
+    import streamlit as st
+    NOTION_API_KEY = st.secrets.get("NOTION_API_KEY", os.getenv("NOTION_API_KEY"))
+    NOTION_DB_ID = st.secrets.get("NOTION_DB_ID", os.getenv("NOTION_DB_ID"))
+except:
+    NOTION_API_KEY = os.getenv("NOTION_API_KEY")
+    NOTION_DB_ID = os.getenv("NOTION_DB_ID")
 
 HEADERS = {
     "Authorization": f"Bearer {NOTION_API_KEY}",
