@@ -1,21 +1,24 @@
-import os
-import json
-from dotenv import load_dotenv
-from openai import OpenAI
-
-# .env 로드 후 환경변수 사용
-load_dotenv()
-client = OpenAI()  # ← 생성자에 api_key 넘기지 말고, 환경변수 OPENAI_API_KEY 사용
-
-# llm.py - 건설현장 특화 버전
+# llm.py - 건설현장 특화 버전 (간단 버전)
 import os
 import json
 from openai import OpenAI
-from dotenv import load_dotenv
+import re
 
-load_dotenv()
+# Streamlit Cloud와 로컬 환경 모두 지원
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # Streamlit Cloud에서는 secrets 사용
 
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+# Streamlit secrets 또는 환경변수 사용
+try:
+    import streamlit as st
+    api_key = st.secrets.get("OPENAI_API_KEY", os.getenv("OPENAI_API_KEY"))
+except:
+    api_key = os.getenv("OPENAI_API_KEY")
+
+client = OpenAI(api_key=api_key)
 
 def analyze_text(text):
     """건설현장 맞춤형 자연어 분석"""
