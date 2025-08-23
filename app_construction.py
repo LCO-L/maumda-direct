@@ -132,119 +132,147 @@ st.caption("건설현장 사장님의 든든한 비즈니스 파트너")
 # 탭 구성
 tab1, tab2, tab3, tab4 = st.tabs(["💰 미수금", "📸 영수증", "📊 현황", "💳 잔금표"])
 
-# Tab 1: 미수금 입력
 with tab1:
     st.subheader("받을 돈 기록하기")
     
-    # ... 음성 입력 UI 코드 ...
+    col1, col2 = st.columns([3, 1])
     
-    # 🔐 음성 인식 버튼
-    if audio_bytes:  # 녹음된 오디오가 있을 때
-        if st.button("🤖 AI 인식"):
-            # API 제한 체크
-            if not check_api_limit("whisper_calls"):
-                st.error("일일 음성인식 한도 초과!")
-                st.stop()
+    with col1:
+        # 음성 입력 섹션
+        st.markdown("### 🎤 음성으로 입력하기")
+        
+        # audio_bytes 초기화
+        audio_bytes = None
+        
+        # 음성 녹음 시도
+        try:
+            from audio_recorder_streamlit import audio_recorder
             
-            with st.spinner("인식 중..."):
-                try:
-                    # Whisper API 호출
-                    # ... 기존 코드 ...
+            # 녹음 버튼
+            audio_bytes = audio_recorder(
+                text="🔴 녹음 시작 (클릭)",
+                recording_color="#FF0000",
+                neutral_color="#4CAF50",
+                icon_name="microphone",
+                icon_size="3x",
+                pause_threshold=2.0
+            )
+            
+            # 녹음된 오디오가 있을 때만 처리
+            if audio_bytes:
+                st.audio(audio_bytes, format="audio/wav")
+                
+                if st.button("🤖 AI 인식", type="primary"):
+                    # API 제한 체크
+                    if not check_api_limit("whisper_calls"):
+                        st.stop()
                     
-                    # 성공 시 로깅
-                    log_activity("voice_recognition", {
-                        "success": True,
-                        "length": len(audio_bytes)
-                    })
-                    
-                except Exception as e:
-                    log_activity("voice_recognition", {
-                        "success": False,
-                        "error": str(e)
-                    })
-                    st.error(f"인식 실패: {e}")
+                    with st.spinner("인식 중..."):
+                        try:
+                            from openai import OpenAI
+                            import tempfile
+                            import os
+                            
+                            # OpenAI 클라이언트
+                            api_key = st.secrets.get("OPENAI_API_KEY", os.getenv("OPENAI_API_KEY"))
+                            client = OpenAI(api_key=api_key)
+                            
+                            # 임시 파일 저장
+                            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+                                tmp.write(audio_bytes)
+                                tmp_path = tmp.name
+                            
+                            # Whisper API 호출
+                            with open(tmp_path, 'rb') as audio_file:
+                                transcript = client.audio.transcriptions.create(
+                                    model="whisper-1",
+                                    file=audio_file,
+                                    language="ko"
+                                )
+                            
+                            # 임시 파일 삭제
+                            os.unlink(tmp_path)
+                            
+                            # 결과 저장
+                            st.session_state.recognized_text = transcript.text
+                            st.success("✅ 인식 완료!")
+                            
+                            # 로깅
+                            log_activity("voice_recognition", {"success": True})
+                            
+                        except Exception as e:
+                            st.error(f"인식 실패: {e}")
+                            log_activity("voice_recognition", {"success": False, "error": str(e)})
+        
+        except ImportError:
+            st.info("🎤 음성 녹음 기능이 준비 중입니다. 아래 텍스트 입력을 사용해주세요.")
+        
+        # 텍스트 입력
+        st.markdown("### ✍️ 직접 입력하기")
+        
+        # 인식된 텍스트가 있으면 자동 입력
+        default_text = ""
+        if 'recognized_text' in st.session_state:
+            default_text = st.session_state.recognized_text
+            st.info(f"🎤 인식된 내용: {default_text}")
+        
+        user_input = st.text_area(
+            "그냥 편하게 말씀하세요",
+            value=default_text,
+            placeholder="""예시:
+- 강남 아파트 타일공사 500만원 다음주 받기로 했어
+- 북구청 방수 작업 끝나면 1000만원 잔금""",
+            height=120,
+            key="voice_text_input"
+        )
     
-    # ... 텍스트 입력 UI 코드 ...
+    with col2:
+        # 빠른 입력 템플릿
+        st.markdown("### 빠른 입력")
+        if st.button("📝 계약금", use_container_width=True):
+            st.session_state.voice_text_input = "현장명 계약금 금액 오늘 받음"
+            st.rerun()
+        
+        if st.button("💵 중도금", use_container_width=True):
+            st.session_state.voice_text_input = "현장명 중도금 금액 날짜 예정"
+            st.rerun()
+        
+        if st.button("💰 잔금", use_container_width=True):
+            st.session_state.voice_text_input = "현장명 잔금 금액 완료시 받기"
+            st.rerun()
     
-    # 🔐 분석 버튼
+    # 분석 버튼
     if st.button("📝 기록하기", type="primary"):
-        if not user_input:
+        if not user_input or not user_input.strip():
             st.warning("내용을 입력해주세요.")
         else:
             # API 제한 체크
             if not check_api_limit("gpt_calls"):
-                st.error("일일 AI 분석 한도 초과!")
                 st.stop()
             
             with st.spinner("AI가 분석 중..."):
                 try:
+                    # 분석 및 정규화
                     raw = analyze_text(user_input)
                     normalized = normalize_data(raw)
                     
-                    # 성공 시 로깅
-                    log_activity("text_analysis", {
-                        "success": True,
-                        "text_length": len(user_input)
-                    })
+                    # 금액 추출
+                    amount = extract_amount(normalized.get('what', ''))
+                    if amount:
+                        normalized['display_amount'] = amount
+                    else:
+                        normalized['display_amount'] = normalized.get('what', '-')
                     
+                    # 세션에 저장
                     st.session_state.analyzed_data = normalized
                     st.session_state.saved = False
                     
-                except Exception as e:
-                    log_activity("text_analysis", {
-                        "success": False,
-                        "error": str(e)
-                    })
-                    st.error(f"분석 실패: {e}")
-    
-    # 분석 결과 표시
-    if st.session_state.get('analyzed_data') and not st.session_state.get('saved'):
-        st.divider()
-        data = st.session_state.analyzed_data
-        
-        # 결과 표시
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("현장/발주처", data.get('who', '-'))
-        with col2:
-            st.metric("금액", data.get('display_amount', '-'))
-        with col3:
-            st.metric("예정일", data.get('when_display', '-'))
-        
-        # 🔐 저장 버튼
-        if st.button("✅ 맞아요, 저장", type="secondary"):
-            # API 제한 체크
-            if not check_api_limit("notion_saves"):
-                st.error("일일 저장 한도 초과!")
-                st.stop()
-            
-            with st.spinner("저장 중..."):
-                try:
-                    status, msg = save_record(data)
+                    # 로깅
+                    log_activity("text_analysis", {"success": True, "text_length": len(user_input)})
                     
-                    if 200 <= status < 300:
-                        # 성공 시 로깅
-                        log_activity("notion_save", {
-                            "success": True,
-                            "site": data.get('who'),
-                            "amount": data.get('what')
-                        })
-                        
-                        st.success("✅ 저장 완료!")
-                        st.session_state.saved = True
-                    else:
-                        log_activity("notion_save", {
-                            "success": False,
-                            "error": msg
-                        })
-                        st.error(f"저장 실패: {msg}")
-                        
                 except Exception as e:
-                    log_activity("notion_save", {
-                        "success": False,
-                        "error": str(e)
-                    })
-                    st.error(f"저장 실패: {e}")
+                    st.error(f"처리 실패: {e}")
+                    log_activity("text_analysis", {"success": False, "error": str(e)})
 # Tab 2: 영수증 OCR
 with tab2:
     st.subheader("영수증 촬영 & 자동 인식")
