@@ -111,69 +111,93 @@ with tab1:
     col1, col2 = st.columns([3, 1])
     
     with col1:
-        # 간단한 음성 입력
+# 음성 입력 섹션
         st.markdown("### 🎤 음성으로 입력하기")
-        user_input = st.text_area(
-            "그냥 편하게 말씀하세요",
-            placeholder="""예시:
-        - 강남 아파트 타일공사 500만원 다음주 받기로 했어
-        - 북구청 방수 작업 끝나면 1000만원 잔금""",
-            height=100,
-            key="voice_text_input"
-        )
         
-        # 음성 입력 버튼 (간단 버전)
-        components.html("""
-            <button onclick="startVoice()" style="
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        speech_html = """
+        <div>
+            <button onclick="startRecognition()" style="
+                background-color: #FF5722;
                 color: white;
                 border: none;
                 padding: 12px 24px;
                 font-size: 16px;
-                border-radius: 50px;
+                border-radius: 8px;
                 cursor: pointer;
                 margin: 10px 0;
             ">
                 🎤 말하기 (클릭 후 말씀하세요)
             </button>
-            <div id="result" style="margin-top: 10px; padding: 10px; background: #f0f0f0; border-radius: 5px; min-height: 30px;"></div>
-            
-            <script>
-            function startVoice() {
-                if ('webkitSpeechRecognition' in window) {
-                    const recognition = new webkitSpeechRecognition();
-                    recognition.lang = 'ko-KR';
-                    recognition.continuous = false;
-                    recognition.interimResults = true;
+            <div id="result" style="margin-top: 10px; padding: 10px; background: #f0f0f0; border-radius: 5px; min-height: 50px;"></div>
+        </div>
+        
+        <script>
+        function startRecognition() {
+            if ('webkitSpeechRecognition' in window) {
+                const recognition = new webkitSpeechRecognition();
+                recognition.lang = 'ko-KR';
+                recognition.continuous = false;
+                recognition.interimResults = true;
+                
+                recognition.onstart = function() {
+                    document.getElementById('result').innerHTML = '🔴 듣고 있습니다...';
+                };
+                
+                recognition.onresult = function(event) {
+                    let finalTranscript = '';
+                    let interimTranscript = '';
                     
-                    recognition.onstart = function() {
-                        document.getElementById('result').innerHTML = '🔴 듣고 있습니다...';
-                    };
+                    for (let i = event.resultIndex; i < event.results.length; ++i) {
+                        if (event.results[i].isFinal) {
+                            finalTranscript += event.results[i][0].transcript;
+                        } else {
+                            interimTranscript += event.results[i][0].transcript;
+                        }
+                    }
                     
-                    recognition.onresult = function(event) {
-                        const text = event.results[0][0].transcript;
-                        document.getElementById('result').innerHTML = '✅ ' + text;
-                        
-                        // Streamlit text_area에 입력
+                    document.getElementById('result').innerHTML = finalTranscript || interimTranscript;
+                    
+                    if (finalTranscript) {
+                        // Streamlit text_area에 직접 입력
                         const textarea = window.parent.document.querySelector('textarea[aria-label="그냥 편하게 말씀하세요"]');
-                        if (textarea) {
-                            textarea.value = text;
+                        if (!textarea) {
+                            // aria-label이 없으면 첫 번째 textarea 선택
+                            const textareas = window.parent.document.querySelectorAll('textarea');
+                            if (textareas.length > 0) {
+                                textareas[0].value = finalTranscript;
+                                textareas[0].dispatchEvent(new Event('input', { bubbles: true }));
+                            }
+                        } else {
+                            textarea.value = finalTranscript;
                             textarea.dispatchEvent(new Event('input', { bubbles: true }));
                         }
-                    };
-                    
-                    recognition.onerror = function(event) {
-                        document.getElementById('result').innerHTML = '❌ 에러: ' + event.error;
-                    };
-                    
-                    recognition.start();
-                } else {
-                    alert('Chrome 브라우저를 사용해주세요!');
-                }
-            }
-            </script>
-        """, height=150)
+                    }
+                };
                 
+                recognition.onerror = function(event) {
+                    document.getElementById('result').innerHTML = '❌ 에러: ' + event.error;
+                };
+                
+                recognition.start();
+            } else {
+                alert('음성 인식이 지원되지 않는 브라우저입니다. Chrome을 사용해주세요.');
+            }
+        }
+        </script>
+        """
+        
+        components.html(speech_html, height=150)
+        
+        # 텍스트 입력
+        st.markdown("### ✍️ 직접 입력하기")
+        user_input = st.text_area(
+            "그냥 편하게 말씀하세요",
+            placeholder="""예시:
+- 강남 아파트 타일공사 500만원 다음주 받기로 했어
+- 북구청 방수 작업 끝나면 1000만원 잔금""",
+            height=100,
+            key="voice_text_input"
+        )
         # 텍스트 입력
         st.markdown("### ✍️ 직접 입력하기")
         user_input = st.text_area(
