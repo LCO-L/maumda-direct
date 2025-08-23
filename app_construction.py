@@ -530,6 +530,6 @@ with footer_cols[2]:
     st.button("⚙️ 설정", use_container_width=True)
 
 with footer_cols[3]:
-    if st.button("🚪 로그아웃", use_container_width=True):
+    if st.button("🚪 로그아웃", use_container_width=True, key="logout_btn_main"):
         st.session_state.clear()
         st.rerun()
