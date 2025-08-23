@@ -188,16 +188,7 @@ with tab1:
         
         components.html(speech_html, height=150)
         
-        # 텍스트 입력
-        st.markdown("### ✍️ 직접 입력하기")
-        user_input = st.text_area(
-            "그냥 편하게 말씀하세요",
-            placeholder="""예시:
-- 강남 아파트 타일공사 500만원 다음주 받기로 했어
-- 북구청 방수 작업 끝나면 1000만원 잔금""",
-            height=100,
-            key="voice_text_input"
-        )
+
         # 텍스트 입력
         st.markdown("### ✍️ 직접 입력하기")
         user_input = st.text_area(
