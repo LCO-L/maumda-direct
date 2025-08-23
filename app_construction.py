@@ -104,152 +104,142 @@ st.caption("건설현장 사장님의 든든한 비즈니스 파트너")
 # 탭 구성
 tab1, tab2, tab3, tab4 = st.tabs(["💰 미수금", "📸 영수증", "📊 현황", "💳 잔금표"])
 
-# Tab 1: 미수금 입력
+# Tab 1: 미수금 입력 부분 수정
 with tab1:
     st.subheader("받을 돈 기록하기")
     
-    col1, col2 = st.columns([3, 1])
+    # 음성/텍스트 입력 통합
+    input_method = st.radio(
+        "입력 방법 선택",
+        ["✍️ 텍스트 입력", "🎤 음성 녹음"],
+        horizontal=True
+    )
     
-    with col1:
-        # AI 음성 인식 추가
-        from services.audio_ai import simple_audio_upload
-        recognized_text = simple_audio_upload()
+    user_input = ""
+    
+    if input_method == "🎤 음성 녹음":
+        st.info("🎤 녹음 버튼을 누르고 말씀하세요 (최대 30초)")
         
-        # 텍스트 입력
-        st.markdown("### ✍️ 직접 입력하기")
+        try:
+            from audio_recorder_streamlit import audio_recorder
+            from openai import OpenAI
+            import tempfile
+            import os
+            
+            # 녹음 컴포넌트
+            audio_bytes = audio_recorder(
+                text="🔴 녹음 시작 (클릭)",
+                recording_color="#FF0000",
+                neutral_color="#008CBA",
+                icon_name="microphone-lines",
+                icon_size="6x",
+                pause_threshold=2.0,
+                sample_rate=16000
+            )
+            
+            if audio_bytes:
+                col1, col2 = st.columns([3, 1])
+                
+                with col1:
+                    st.audio(audio_bytes, format="audio/wav")
+                
+                with col2:
+                    if st.button("🤖 인식", type="primary", use_container_width=True):
+                        with st.spinner("인식 중..."):
+                            try:
+                                # OpenAI 클라이언트 초기화
+                                api_key = st.secrets.get("OPENAI_API_KEY", os.getenv("OPENAI_API_KEY"))
+                                if not api_key:
+                                    st.error("API 키가 설정되지 않았습니다")
+                                else:
+                                    client = OpenAI(api_key=api_key)
+                                    
+                                    # 임시 파일 생성
+                                    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+                                        tmp.write(audio_bytes)
+                                        tmp_path = tmp.name
+                                    
+                                    # Whisper API 호출
+                                    with open(tmp_path, 'rb') as audio_file:
+                                        response = client.audio.transcriptions.create(
+                                            model="whisper-1",
+                                            file=audio_file,
+                                            language="ko",
+                                            response_format="text"
+                                        )
+                                    
+                                    # 임시 파일 삭제
+                                    os.unlink(tmp_path)
+                                    
+                                    # 결과 저장
+                                    user_input = response
+                                    st.success("✅ 인식 완료!")
+                                    st.text_area("인식된 내용", user_input, height=100)
+                                    
+                            except Exception as e:
+                                st.error(f"오류: {str(e)}")
+                                st.info("다시 녹음해주세요")
         
-        # 음성 인식 결과가 있으면 자동 입력
-        default_text = recognized_text if recognized_text else ""
-        
+        except ImportError:
+            st.error("음성 녹음 패키지 설치가 필요합니다")
+            st.code("pip install audio-recorder-streamlit", language="bash")
+            
+            # 대체 방법 제공
+            st.divider()
+            st.markdown("#### 대체 방법: 파일 업로드")
+            audio_file = st.file_uploader("음성 파일", type=['wav', 'mp3', 'm4a'])
+            
+            if audio_file:
+                st.audio(audio_file)
+                if st.button("🤖 AI 인식"):
+                    st.info("파일 인식 기능 준비 중...")
+    
+    else:  # 텍스트 입력
         user_input = st.text_area(
-            "그냥 편하게 말씀하세요",
-            value=default_text,
-            placeholder="""예시:
-- 강남 아파트 타일공사 500만원 다음주 받기로 했어
-- 북구청 방수 작업 끝나면 1000만원 잔금""",
-            height=120,
-            key="voice_text_input"
-        )
-
-        # 텍스트 입력
-        st.markdown("### ✍️ 직접 입력하기")
-        user_input = st.text_area(
-            "그냥 편하게 말씀하세요",
+            "내용을 입력하세요",
             placeholder="""예시:
 • 강남 아파트 타일공사 500만원 다음주 받기로 했어
 • 북구청 방수 작업 끝나면 1000만원 잔금
 • 김사장한테 인테리어 대금 300만원 15일에 받아야 돼""",
-            height=100,
-            value=st.session_state.voice_input
+            height=150
         )
     
-    with col2:
-        st.markdown("### 빠른 입력")
-        
-        # 템플릿 버튼들
+    # 빠른 입력 템플릿
+    st.markdown("#### 빠른 입력")
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
         if st.button("📝 계약금", use_container_width=True):
-            st.session_state.voice_input = "현장이름 계약금 금액 오늘 받음"
-            st.rerun()
-        
+            user_input = "현장명 계약금 금액 오늘 받음"
+    
+    with col2:
         if st.button("💵 중도금", use_container_width=True):
-            st.session_state.voice_input = "현장이름 중도금 금액 날짜 예정"
-            st.rerun()
-        
+            user_input = "현장명 중도금 금액 날짜 예정"
+    
+    with col3:
         if st.button("💰 잔금", use_container_width=True):
-            st.session_state.voice_input = "현장이름 잔금 금액 완료시 받기"
-            st.rerun()
+            user_input = "현장명 잔금 금액 완료시 받기"
     
     # 분석 버튼
-    if st.button("📝 기록하기", type="primary"):
-        if not user_input.strip():
-            st.warning("내용을 입력해주세요.")
+    if st.button("📝 기록하기", type="primary", use_container_width=True):
+        if not user_input or not user_input.strip():
+            st.warning("내용을 입력하거나 녹음해주세요.")
         else:
-            with st.spinner("정리 중..."):
+            with st.spinner("AI가 분석 중..."):
                 try:
                     raw = analyze_text(user_input)
-                    
-                    # 디버깅: 원본 분석 결과 확인
-                    print(f"LLM 분석 결과: {raw}")
-                    
                     normalized = normalize_data(raw)
                     
-                    # 디버깅: 정규화 후 결과 확인
-                    print(f"정규화 후: {normalized}")
-                    
-                    # 금액 추출 - what 필드에서 금액 부분만 추출
-                    what_text = normalized.get('what', '')
-                    amount = None
-                    
-                    # 우선 정규화된 what에서 금액 찾기
-                    if what_text:
-                        amount = extract_amount(what_text)
-                    
-                    # 못 찾았으면 원본 what_display에서 찾기
-                    if not amount and normalized.get('what_display'):
-                        amount = extract_amount(normalized.get('what_display'))
-                        # 원본에서 찾은 경우 변환 필요
-                        if amount and '만' in normalized.get('what_display', ''):
-                            # 다시 정규화
-                            import re
-                            num_match = re.search(r'(\d+)\s*만', normalized.get('what_display', ''))
-                            if num_match:
-                                num = int(num_match.group(1))
-                                amount = f"{num * 10000:,}원"
-                    
-                    # 최종 금액 설정
-                    if amount and amount != "000,000원":
+                    # 금액 추출
+                    amount = extract_amount(normalized.get('what', ''))
+                    if amount:
                         normalized['display_amount'] = amount
-                    else:
-                        # 기본값
-                        normalized['display_amount'] = what_text if what_text else '금액 미입력'
-                    
-                    # 디버깅: 최종 금액 확인
-                    print(f"표시할 금액: {normalized.get('display_amount')}")
                     
                     st.session_state.analyzed_data = normalized
                     st.session_state.saved = False
                     
                 except Exception as e:
                     st.error(f"처리 실패: {e}")
-    
-    # 분석 결과 표시
-    if st.session_state.analyzed_data and not st.session_state.saved:
-        st.divider()
-        data = st.session_state.analyzed_data
-        
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            st.metric("현장/발주처", data.get('who', '-'))
-        
-        with col2:
-            amount = data.get('display_amount', data.get('what', '-'))
-            # 금액이 비어있거나 잘못된 경우 처리
-            if not amount or amount == '-' or amount == '000,000원':
-                # what 필드에서 다시 추출 시도
-                if data.get('what'):
-                    amount = extract_amount(data.get('what'))
-                    if not amount:
-                        amount = data.get('what')
-                else:
-                    amount = '금액 미입력'
-            st.metric("금액", amount)
-        
-        with col3:
-            when = data.get('when_display', data.get('when', '-'))
-            st.metric("예정일", when)
-        
-        if st.button("✅ 맞아요, 저장", type="secondary"):
-            with st.spinner("저장 중..."):
-                status, msg = save_record(data)
-                
-            if 200 <= status < 300:
-                st.success("✅ 저장 완료!")
-                st.balloons()
-                st.session_state.saved = True
-            else:
-                st.error("저장 실패. 다시 시도해주세요.")
-
 # Tab 2: 영수증 OCR
 with tab2:
     st.subheader("영수증 촬영 & 자동 인식")
