@@ -4,6 +4,7 @@ from services.llm import analyze_text
 from services.utils import normalize_data
 from services.notion import save_record
 from services.voice_input import get_voice_input
+from services.auth import check_password, validate_api_usage, log_activity, check_api_limit
 import re
 import pandas as pd
 import plotly.express as px
