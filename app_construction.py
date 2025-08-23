@@ -14,8 +14,32 @@ from PIL import Image
 import io
 
 # 페이지 설정
-st.set_page_config(page_title="마음다이렉트 💼", page_icon="🏗️", layout="wide")
+st.set_page_config(
+    page_title="마음다이렉트 💼",
+    page_icon="🏗️",
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
 
+# 🔐 로그인 체크 (가장 먼저!)
+if not check_password():
+    st.stop()  # 로그인하지 않으면 아래 코드 실행 안 함
+
+# 로그인 성공 후 메인 앱 시작
+st.title("🏗️ 마음다이렉트")
+st.caption("건설현장 사장님의 든든한 비즈니스 파트너")
+
+# API 사용량 표시
+usage, limits = validate_api_usage()
+with st.expander("📊 오늘 사용량"):
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("음성인식", f"{usage['whisper_calls']}/{limits['whisper_calls']}")
+    with col2:
+        st.metric("AI 분석", f"{usage['gpt_calls']}/{limits['gpt_calls']}")
+    with col3:
+        st.metric("저장", f"{usage['notion_saves']}/{limits['notion_saves']}")
+        
 # 세션 상태 초기화
 if 'analyzed_data' not in st.session_state:
     st.session_state.analyzed_data = None
