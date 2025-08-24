@@ -200,22 +200,86 @@ def rule_based_parse(text):
         result['payment_type'] = '기타'
     
     # 5. 예상 날짜 추출
-    today = datetime.now()
+    today = datetime.now()  # 시스템 날짜 자동 가져오기
     
     # 조건부 날짜 (작업 완료 후 등)
     if any(word in text for word in ['끝나면', '완료되면', '완료후', '완료 후', '끝나고']):
         result['expected_date'] = '작업 완료 후'
     else:
-        date_patterns = [
-            (r'오늘', today.strftime('%Y-%m-%d')),
-            (r'내일', (today + timedelta(days=1)).strftime('%Y-%m-%d')),
-            (r'모레', (today + timedelta(days=2)).strftime('%Y-%m-%d')),
-            (r'글피', (today + timedelta(days=3)).strftime('%Y-%m-%d')),
-            (r'이번\s*주', f"이번주 ({today.strftime('%Y-%m-%d')} 주)"),
-            (r'다음\s*주', (today + timedelta(days=7)).strftime('%Y-%m-%d')),
-            (r'(\d+)일\s*후', lambda m: (today + timedelta(days=int(m.group(1)))).strftime('%Y-%m-%d')),
-            (r'(\d+)일\s*뒤', lambda m: (today + timedelta(days=int(m.group(1)))).strftime('%Y-%m-%d')),
-        ]
+        # 다음주 + 요일 패턴을 먼저 처리
+        if '다음주' in text or '다음 주' in text:
+            # 현재 요일 확인 (0=월요일, 6=일요일)
+            current_weekday = today.weekday()
+            
+            # 다음주 월요일까지 남은 일수 계산
+            days_until_next_monday = (7 - current_weekday) % 7
+            if days_until_next_monday == 0:  # 오늘이 월요일이면
+                days_until_next_monday = 7
+            
+            next_monday = today + timedelta(days=days_until_next_monday)
+            
+            # 요일별 처리
+            if '월요일' in text:
+                result['expected_date'] = next_monday.strftime('%Y-%m-%d')
+            elif '화요일' in text:
+                result['expected_date'] = (next_monday + timedelta(days=1)).strftime('%Y-%m-%d')
+            elif '수요일' in text:
+                result['expected_date'] = (next_monday + timedelta(days=2)).strftime('%Y-%m-%d')
+            elif '목요일' in text:
+                result['expected_date'] = (next_monday + timedelta(days=3)).strftime('%Y-%m-%d')
+            elif '금요일' in text:
+                result['expected_date'] = (next_monday + timedelta(days=4)).strftime('%Y-%m-%d')
+            elif '토요일' in text:
+                result['expected_date'] = (next_monday + timedelta(days=5)).strftime('%Y-%m-%d')
+            elif '일요일' in text:
+                result['expected_date'] = (next_monday + timedelta(days=6)).strftime('%Y-%m-%d')
+            else:
+                # 요일 지정 없으면 다음주 월요일
+                result['expected_date'] = next_monday.strftime('%Y-%m-%d')
+        
+        # 이번주 + 요일 패턴
+        elif '이번주' in text or '이번 주' in text:
+            weekday_map = {
+                '월요일': 0, '화요일': 1, '수요일': 2, '목요일': 3,
+                '금요일': 4, '토요일': 5, '일요일': 6
+            }
+            
+            for day_name, day_num in weekday_map.items():
+                if day_name in text:
+                    # 이번주의 특정 요일 계산
+                    days_ahead = day_num - today.weekday()
+                    if days_ahead <= 0:  # 이미 지난 경우
+                        days_ahead += 7
+                    result['expected_date'] = (today + timedelta(days=days_ahead)).strftime('%Y-%m-%d')
+                    break
+        
+        # 요일만 언급된 경우 (이번주로 간주)
+        elif any(day in text for day in ['월요일', '화요일', '수요일', '목요일', '금요일', '토요일', '일요일']):
+            weekday_map = {
+                '월요일': 0, '화요일': 1, '수요일': 2, '목요일': 3,
+                '금요일': 4, '토요일': 5, '일요일': 6
+            }
+            
+            for day_name, day_num in weekday_map.items():
+                if day_name in text:
+                    days_ahead = day_num - today.weekday()
+                    if days_ahead <= 0:  # 이미 지났거나 오늘이면 다음주
+                        days_ahead += 7
+                    result['expected_date'] = (today + timedelta(days=days_ahead)).strftime('%Y-%m-%d')
+                    break
+        
+        # 기타 날짜 패턴들
+        else:
+            date_patterns = [
+                (r'오늘', today.strftime('%Y-%m-%d')),
+                (r'내일', (today + timedelta(days=1)).strftime('%Y-%m-%d')),
+                (r'모레', (today + timedelta(days=2)).strftime('%Y-%m-%d')),
+                (r'글피', (today + timedelta(days=3)).strftime('%Y-%m-%d')),
+                (r'어제', (today - timedelta(days=1)).strftime('%Y-%m-%d')),
+                (r'(\d+)일\s*후', lambda m: (today + timedelta(days=int(m.group(1)))).strftime('%Y-%m-%d')),
+                (r'(\d+)일\s*뒤', lambda m: (today + timedelta(days=int(m.group(1)))).strftime('%Y-%m-%d')),
+                (r'(\d+)일\s*전', lambda m: (today - timedelta(days=int(m.group(1)))).strftime('%Y-%m-%d')),
+            ]
         
         for pattern, replacement in date_patterns:
             match = re.search(pattern, text)
