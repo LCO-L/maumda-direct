@@ -1,7 +1,6 @@
 import streamlit as st
 import streamlit.components.v1 as components
-from services.llm import analyze_text
-from services.utils import normalize_data
+from services.llm import analyze_text, normalize_data
 from services.notion import save_record
 from services.voice_input import get_voice_input
 from services.auth import check_password, validate_api_usage, log_activity, check_api_limit
@@ -17,7 +16,7 @@ import io
 # 페이지 설정
 st.set_page_config(
     page_title="마음다이렉트 💼",
-    page_icon="🏗️",
+    page_icon="🗏",
     layout="wide"
 )
 
@@ -35,11 +34,11 @@ if not check_password():
 usage, limits = validate_api_usage()
 with st.sidebar:
     st.markdown("### 📊 오늘 사용량")
-    st.progress(usage['gpt_calls'] / limits['gpt_calls'])
+    st.progress(usage['gpt_calls'] / limits['gpt_calls'] if limits['gpt_calls'] > 0 else 0)
     st.caption(f"AI 분석: {usage['gpt_calls']}/{limits['gpt_calls']}")
-    st.progress(usage['whisper_calls'] / limits['whisper_calls'])
+    st.progress(usage['whisper_calls'] / limits['whisper_calls'] if limits['whisper_calls'] > 0 else 0)
     st.caption(f"음성인식: {usage['whisper_calls']}/{limits['whisper_calls']}")
-    st.progress(usage['notion_saves'] / limits['notion_saves'])
+    st.progress(usage['notion_saves'] / limits['notion_saves'] if limits['notion_saves'] > 0 else 0)
     st.caption(f"저장: {usage['notion_saves']}/{limits['notion_saves']}")
         
 # 세션 상태 초기화
@@ -91,7 +90,7 @@ def create_payment_chart(data):
     
     for index, row in data.iterrows():
         # 전체 대비 받은 금액 비율
-        received_pct = (row['받은금액'] / row['계약금액']) * 100
+        received_pct = (row['받은금액'] / row['계약금액']) * 100 if row['계약금액'] > 0 else 0
         remaining_pct = 100 - received_pct
         
         fig.add_trace(go.Bar(
@@ -124,7 +123,7 @@ def create_payment_chart(data):
     return fig
 
 # 타이틀
-st.title("🏗️ 마음다이렉트")
+st.title("🗏 마음다이렉트")
 st.caption("건설현장 사장님의 든든한 비즈니스 파트너")
 
 # 탭 구성
@@ -206,7 +205,7 @@ with tab1:
             st.info("🎤 음성 녹음 기능이 준비 중입니다. 아래 텍스트 입력을 사용해주세요.")
         
         # 텍스트 입력
-        st.markdown("### ✍️ 직접 입력하기")
+        st.markdown("### ✏️ 직접 입력하기")
         
         # 인식된 텍스트가 있으면 자동 입력
         default_text = ""
@@ -240,7 +239,7 @@ with tab1:
             st.rerun()
     
     # 분석 버튼
-    if st.button("📝 기록하기", type="primary"):
+    if st.button("🔍 기록하기", type="primary"):
         if not user_input or not user_input.strip():
             st.warning("내용을 입력해주세요.")
         else:
@@ -253,13 +252,6 @@ with tab1:
                     # 분석 및 정규화
                     raw = analyze_text(user_input)
                     normalized = normalize_data(raw)
-                    
-                    # 금액 추출
-                    amount = extract_amount(normalized.get('what', ''))
-                    if amount:
-                        normalized['display_amount'] = amount
-                    else:
-                        normalized['display_amount'] = normalized.get('what', '-')
                     
                     # 세션에 저장
                     st.session_state.analyzed_data = normalized
@@ -275,7 +267,7 @@ with tab1:
     # 분석 결과 표시
     if st.session_state.analyzed_data:
         st.divider()
-        st.subheader("📝 AI 분석 결과")
+        st.subheader("📋 AI 분석 결과")
         
         data = st.session_state.analyzed_data
         
@@ -290,11 +282,10 @@ with tab1:
                     st.markdown(f"""
                     - **🏗️ 현장:** {data.get('who', '-')}
                     - **📋 내용:** {data.get('what', '-')}  
-                    - **💰 금액:** {data.get('display_amount', '-')}
+                    - **💰 금액:** {data.get('how', '-')}
                     - **📅 언제:** {data.get('when', '-')}
                     - **📍 위치:** {data.get('where', '-')}
-                    - **❓ 어떻게:** {data.get('how', '-')}
-                    - **💡 왜:** {data.get('why', '-')}
+                    - **❓ 유형:** {data.get('why', '-')}
                     """)
                 
                 # 수정 가능한 필드들
@@ -303,6 +294,8 @@ with tab1:
                     data['what'] = st.text_input("작업 내용", data.get('what', ''))
                     data['when'] = st.text_input("날짜", data.get('when', ''))
                     data['where'] = st.text_input("위치", data.get('where', ''))
+                    data['why'] = st.text_input("유형", data.get('why', ''))
+                    data['how'] = st.text_input("금액", data.get('how', ''))
             
             with col2:
                 st.markdown("### 💾 저장")
@@ -317,8 +310,8 @@ with tab1:
                                 
                             with st.spinner("저장 중..."):
                                 try:
-                                    result = save_record(data)
-                                    if result:
+                                    status, msg = save_record(data)
+                                    if 200 <= status < 300:
                                         st.success("✅ 저장 완료!")
                                         st.session_state.saved = True
                                         
@@ -331,7 +324,7 @@ with tab1:
                                         if 'recognized_text' in st.session_state:
                                             del st.session_state.recognized_text
                                     else:
-                                        st.error("❌ 저장 실패")
+                                        st.error(f"❌ 저장 실패: {msg}")
                                         log_activity("notion_save", {"success": False})
                                 except Exception as e:
                                     st.error(f"저장 실패: {e}")
@@ -374,7 +367,7 @@ with tab2:
     
     with col2:
         if image_to_process:
-            st.markdown("### 📝 인식 결과")
+            st.markdown("### 📋 인식 결과")
             
             with st.spinner("영수증 분석 중..."):
                 # OCR 처리 (실제로는 Google Vision API 사용)
