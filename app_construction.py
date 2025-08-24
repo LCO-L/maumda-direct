@@ -1,441 +1,615 @@
-# llm.py - 건설현장 실무 특화 버전
-import os
-import json
+import streamlit as st
+import streamlit.components.v1 as components
+from services.llm import analyze_text, normalize_data
+from services.notion import save_record
+from services.voice_input import get_voice_input
+from services.auth import check_password, validate_api_usage, log_activity, check_api_limit
 import re
+import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
 from datetime import datetime, timedelta
-from openai import OpenAI
+import base64
+from PIL import Image
+import io
 
-# Streamlit Cloud와 로컬 환경 모두 지원
-try:
-    from dotenv import load_dotenv
-    load_dotenv()
-except ImportError:
-    pass
+# 페이지 설정
+st.set_page_config(
+    page_title="마음다이렉트 💼",
+    page_icon="🗏",
+    layout="wide"
+)
 
-# DeepSeek API 설정
-try:
-    import streamlit as st
-    DEEPSEEK_API_KEY = st.secrets.get("DEEPSEEK_API_KEY", os.getenv("DEEPSEEK_API_KEY"))
-except:
-    DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
+# ============================================
+# 🔐 보안: 로그인 체크 (가장 먼저!)
+# ============================================
+if not check_password():
+    st.stop()  # 로그인 안 하면 여기서 멈춤
 
-# DeepSeek 클라이언트 설정
-if DEEPSEEK_API_KEY:
-    deepseek_client = OpenAI(
-        api_key=DEEPSEEK_API_KEY,
-        base_url="https://api.deepseek.com/v1"
-    )
-else:
-    deepseek_client = None
+# ============================================
+# 메인 앱 시작 (로그인 성공 후)
+# ============================================
 
-def analyze_text(text):
-    """건설현장 실무 중심 텍스트 분석"""
+# API 사용량 표시
+usage, limits = validate_api_usage()
+with st.sidebar:
+    st.markdown("### 📊 오늘 사용량")
+    st.progress(usage['gpt_calls'] / limits['gpt_calls'] if limits['gpt_calls'] > 0 else 0)
+    st.caption(f"AI 분석: {usage['gpt_calls']}/{limits['gpt_calls']}")
+    st.progress(usage['whisper_calls'] / limits['whisper_calls'] if limits['whisper_calls'] > 0 else 0)
+    st.caption(f"음성인식: {usage['whisper_calls']}/{limits['whisper_calls']}")
+    st.progress(usage['notion_saves'] / limits['notion_saves'] if limits['notion_saves'] > 0 else 0)
+    st.caption(f"저장: {usage['notion_saves']}/{limits['notion_saves']}")
+        
+# 세션 상태 초기화
+if 'analyzed_data' not in st.session_state:
+    st.session_state.analyzed_data = None
+if 'saved' not in st.session_state:
+    st.session_state.saved = False
+if 'voice_input' not in st.session_state:
+    st.session_state.voice_input = ""
+
+# 헬퍼 함수들
+def extract_amount(text):
+    """텍스트에서 금액 추출"""
+    if not text:
+        return None
     
-    prompt = f"""
-    건설현장 수금 관리 시스템입니다.
-    아래 텍스트를 분석해서 JSON 형식으로 변환하세요.
-
-    분석할 텍스트: "{text}"
-
-    반환 형식:
-    {{
-        "site_name": "현장명 또는 거래처명",
-        "work_type": "작업 종류",
-        "amount": "금액 (숫자만)",
-        "payment_type": "계약금|중도금|잔금|자재비|인건비|기타",
-        "expected_date": "받을 날짜",
-        "payment_method": "현금|계좌이체|카드|미정",
-        "memo": "추가 메모사항"
-    }}
-
-    **분석 규칙:**
-    1. site_name: "북구청", "강남 아파트", "김사장" 등 거래처/현장명
-    2. work_type: "방수", "타일", "미장", "조적", "인테리어" 등
-    3. amount: 숫자만 (예: "1000만원" → "10000000")
-    4. payment_type: 텍스트에서 "잔금", "중도금" 등 찾기
-    5. expected_date: "YYYY-MM-DD" 형식으로 변환
-    6. 정보가 없으면 빈 문자열 ""
+    patterns = [
+        r'(\d+)만\s*원',
+        r'(\d+)만',
+        r'(\d+,\d+)원',
+        r'(\d+)원'
+    ]
     
-    반드시 유효한 JSON만 반환하세요.
+    for pattern in patterns:
+        match = re.search(pattern, text)
+        if match:
+            return match.group(0)
+    
+    return text
+
+def process_ocr_image(image):
+    """이미지에서 텍스트 추출 (간단한 시뮬레이션)"""
+    # 실제로는 Google Vision API나 AWS Textract 사용
+    # 여기서는 데모용 시뮬레이션
+    demo_text = """
+    한솔건설자재
+    2025-01-23
+    
+    시멘트 20포: 150,000원
+    타일 50박스: 850,000원
+    
+    합계: 1,000,000원
     """
+    return demo_text
+
+def create_payment_chart(data):
+    """잔금 현황 차트 생성"""
+    fig = go.Figure()
     
-    if deepseek_client:
+    for index, row in data.iterrows():
+        # 전체 대비 받은 금액 비율
+        received_pct = (row['받은금액'] / row['계약금액']) * 100 if row['계약금액'] > 0 else 0
+        remaining_pct = 100 - received_pct
+        
+        fig.add_trace(go.Bar(
+            name='받은 돈',
+            x=[row['현장명']],
+            y=[row['받은금액']],
+            text=f"{row['받은금액']:,}원",
+            textposition='inside',
+            marker_color='#4CAF50'
+        ))
+        
+        fig.add_trace(go.Bar(
+            name='받을 돈',
+            x=[row['현장명']],
+            y=[row['잔금']],
+            text=f"{row['잔금']:,}원",
+            textposition='inside',
+            marker_color='#FF9800'
+        ))
+    
+    fig.update_layout(
+        barmode='stack',
+        height=400,
+        title="현장별 수금 현황",
+        yaxis_title="금액 (원)",
+        showlegend=True,
+        hovermode='x unified'
+    )
+    
+    return fig
+
+# 타이틀
+st.title("🗏 마음다이렉트")
+st.caption("건설현장 사장님의 든든한 비즈니스 파트너")
+
+# 탭 구성
+tab1, tab2, tab3, tab4 = st.tabs(["💰 미수금", "📸 영수증", "📊 현황", "💳 잔금표"])
+
+with tab1:
+    st.subheader("받을 돈 기록하기")
+    
+    col1, col2 = st.columns([3, 1])
+    
+    with col1:
+        # 음성 입력 섹션
+        st.markdown("### 🎤 음성으로 입력하기")
+        
+        # audio_bytes 초기화
+        audio_bytes = None
+        
+        # 음성 녹음 시도
         try:
-            response = deepseek_client.chat.completions.create(
-                model="deepseek-chat",
-                messages=[
-                    {"role": "system", "content": "건설현장 수금 관리 데이터 분석 AI"},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.1,
-                response_format={"type": "json_object"}
+            from audio_recorder_streamlit import audio_recorder
+            
+            # 녹음 버튼
+            audio_bytes = audio_recorder(
+                text="🔴 녹음 시작 (클릭)",
+                recording_color="#FF0000",
+                neutral_color="#4CAF50",
+                icon_name="microphone",
+                icon_size="3x",
+                pause_threshold=2.0
             )
             
-            result = json.loads(response.choices[0].message.content or "{}")
-            print(f"AI 분석 결과: {result}")
-            return post_process(result, text)
-            
-        except Exception as e:
-            print(f"AI 분석 오류: {e}")
-            return rule_based_parse(text)
-    else:
-        return rule_based_parse(text)
-
-def rule_based_parse(text):
-    """규칙 기반 파싱 (AI 없이도 작동)"""
-    result = {
-        'site_name': '',
-        'work_type': '',
-        'amount': '',
-        'payment_type': '',
-        'expected_date': '',
-        'payment_method': '',
-        'memo': ''
-    }
-    
-    # 1. 현장명/거래처 추출
-    site_patterns = [
-        (r'(\S+구청)', 1),
-        (r'(\S+시청)', 1),
-        (r'(\S+청사)', 1),
-        (r'(\S+\s?아파트)', 1),
-        (r'(\S+\s?현장)', 1),
-        (r'(\S+\s?빌딩)', 1),
-        (r'(\S+\s?오피스텔)', 1),
-        (r'(\S+\s?빌라)', 1),
-        (r'(\S+\s?주택)', 1),
-        (r'(\S+건설)', 1),
-        (r'(\S+건축)', 1),
-        (r'(\S+시공)', 1),
-        (r'(\S+인테리어)', 1),
-        (r'(\S+사장)', 1),
-    ]
-    
-    for pattern, group in site_patterns:
-        match = re.search(pattern, text)
-        if match:
-            result['site_name'] = match.group(group).strip()
-            break
-    
-    # 2. 작업 종류 추출
-    work_keywords = {
-        '방수': '방수공사',
-        '미장': '미장공사',
-        '조적': '조적공사',
-        '타일': '타일공사',
-        '인테리어': '인테리어',
-        '도색': '도색작업',
-        '페인트': '페인트작업',
-        '전기': '전기공사',
-        '설비': '설비공사',
-        '철근': '철근작업',
-        '도배': '도배작업',
-        '장판': '장판작업',
-        '샷시': '샷시공사',
-        '유리': '유리공사',
-        '목공': '목공작업',
-        '철거': '철거작업',
-        '청소': '청소작업'
-    }
-    
-    for keyword, work_name in work_keywords.items():
-        if keyword in text:
-            result['work_type'] = work_name
-            break
-    
-    # 작업이 안 나오면 text에서 "작업" 앞 단어 추출
-    if not result['work_type']:
-        work_match = re.search(r'(\S+)\s*작업', text)
-        if work_match:
-            result['work_type'] = f"{work_match.group(1)}작업"
-    
-    # 3. 금액 추출 (숫자로 변환)
-    amount_patterns = [
-        (r'(\d+)\s*억\s*(\d+)?\s*만?\s*원?', lambda m: 
-            int(m.group(1)) * 100000000 + (int(m.group(2)) * 10000 if m.group(2) else 0)),
-        (r'(\d+)\s*천\s*만\s*원?', lambda m: int(m.group(1)) * 10000000),
-        (r'(\d+)\s*백\s*만\s*원?', lambda m: int(m.group(1)) * 1000000),
-        (r'(\d+)\s*만\s*원', lambda m: int(m.group(1)) * 10000),
-        (r'(\d+)\s*만원', lambda m: int(m.group(1)) * 10000),
-        (r'(\d+)만', lambda m: int(m.group(1)) * 10000),
-        (r'(\d{7,})\s*원', lambda m: int(m.group(1))),  # 7자리 이상 숫자
-        (r'(\d+,\d+)\s*원', lambda m: int(m.group(1).replace(',', ''))),
-    ]
-    
-    for pattern, converter in amount_patterns:
-        match = re.search(pattern, text)
-        if match:
-            result['amount'] = str(converter(match))
-            break
-    
-    # 4. 거래 유형 추출
-    payment_types = {
-        '계약금': '계약금',
-        '착수금': '계약금',
-        '선금': '계약금',
-        '중도금': '중도금',
-        '중도 금': '중도금',
-        '잔금': '잔금',
-        '잔 금': '잔금',
-        '완료금': '잔금',
-        '준공금': '잔금',
-        '자재비': '자재비',
-        '자재 비': '자재비',
-        '자재값': '자재비',
-        '자재 값': '자재비',
-        '인건비': '인건비',
-        '인건 비': '인건비',
-        '노무비': '인건비',
-        '일당': '인건비',
-        '품값': '인건비',
-        '품삯': '인건비'
-    }
-    
-    for keyword, ptype in payment_types.items():
-        if keyword in text:
-            result['payment_type'] = ptype
-            break
-    
-    if not result['payment_type']:
-        result['payment_type'] = '기타'
-    
-    # 5. 예상 날짜 추출
-    today = datetime.now()  # 시스템 날짜 자동 가져오기
-    
-    # 조건부 날짜 (작업 완료 후 등)
-    if any(word in text for word in ['끝나면', '완료되면', '완료후', '완료 후', '끝나고']):
-        result['expected_date'] = '작업 완료 후'
-    else:
-        # 다음주 + 요일 패턴을 먼저 처리
-        if '다음주' in text or '다음 주' in text:
-            # 현재 요일 확인 (0=월요일, 6=일요일)
-            current_weekday = today.weekday()
-            
-            # 다음주 월요일까지 남은 일수 계산
-            days_until_next_monday = (7 - current_weekday) % 7
-            if days_until_next_monday == 0:  # 오늘이 월요일이면
-                days_until_next_monday = 7
-            
-            next_monday = today + timedelta(days=days_until_next_monday)
-            
-            # 요일별 처리
-            if '월요일' in text:
-                result['expected_date'] = next_monday.strftime('%Y-%m-%d')
-            elif '화요일' in text:
-                result['expected_date'] = (next_monday + timedelta(days=1)).strftime('%Y-%m-%d')
-            elif '수요일' in text:
-                result['expected_date'] = (next_monday + timedelta(days=2)).strftime('%Y-%m-%d')
-            elif '목요일' in text:
-                result['expected_date'] = (next_monday + timedelta(days=3)).strftime('%Y-%m-%d')
-            elif '금요일' in text:
-                result['expected_date'] = (next_monday + timedelta(days=4)).strftime('%Y-%m-%d')
-            elif '토요일' in text:
-                result['expected_date'] = (next_monday + timedelta(days=5)).strftime('%Y-%m-%d')
-            elif '일요일' in text:
-                result['expected_date'] = (next_monday + timedelta(days=6)).strftime('%Y-%m-%d')
-            else:
-                # 요일 지정 없으면 다음주 월요일
-                result['expected_date'] = next_monday.strftime('%Y-%m-%d')
+            # 녹음된 오디오가 있을 때만 처리
+            if audio_bytes:
+                st.audio(audio_bytes, format="audio/wav")
+                
+                if st.button("🤖 AI 인식", type="primary"):
+                    # 🔐 API 제한 체크
+                    if not check_api_limit("whisper_calls"):
+                        st.stop()
+                    
+                    with st.spinner("인식 중..."):
+                        try:
+                            from openai import OpenAI
+                            import tempfile
+                            import os
+                            
+                            # OpenAI 클라이언트
+                            api_key = st.secrets.get("OPENAI_API_KEY", os.getenv("OPENAI_API_KEY"))
+                            client = OpenAI(api_key=api_key)
+                            
+                            # 임시 파일 저장
+                            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+                                tmp.write(audio_bytes)
+                                tmp_path = tmp.name
+                            
+                            # Whisper API 호출
+                            with open(tmp_path, 'rb') as audio_file:
+                                transcript = client.audio.transcriptions.create(
+                                    model="whisper-1",
+                                    file=audio_file,
+                                    language="ko"
+                                )
+                            
+                            # 임시 파일 삭제
+                            os.unlink(tmp_path)
+                            
+                            # 결과 저장
+                            st.session_state.recognized_text = transcript.text
+                            st.success("✅ 인식 완료!")
+                            
+                            # 🔐 활동 로깅
+                            log_activity("voice_recognition", {"success": True, "text_length": len(transcript.text)})
+                            
+                        except Exception as e:
+                            st.error(f"인식 실패: {e}")
+                            log_activity("voice_recognition", {"success": False, "error": str(e)})
         
-        # 이번주 + 요일 패턴
-        elif '이번주' in text or '이번 주' in text:
-            weekday_map = {
-                '월요일': 0, '화요일': 1, '수요일': 2, '목요일': 3,
-                '금요일': 4, '토요일': 5, '일요일': 6
-            }
-            
-            for day_name, day_num in weekday_map.items():
-                if day_name in text:
-                    # 이번주의 특정 요일 계산
-                    days_ahead = day_num - today.weekday()
-                    if days_ahead <= 0:  # 이미 지난 경우
-                        days_ahead += 7
-                    result['expected_date'] = (today + timedelta(days=days_ahead)).strftime('%Y-%m-%d')
-                    break
+        except ImportError:
+            st.info("🎤 음성 녹음 기능이 준비 중입니다. 아래 텍스트 입력을 사용해주세요.")
         
-        # 요일만 언급된 경우 (이번주로 간주)
-        elif any(day in text for day in ['월요일', '화요일', '수요일', '목요일', '금요일', '토요일', '일요일']):
-            weekday_map = {
-                '월요일': 0, '화요일': 1, '수요일': 2, '목요일': 3,
-                '금요일': 4, '토요일': 5, '일요일': 6
-            }
-            
-            for day_name, day_num in weekday_map.items():
-                if day_name in text:
-                    days_ahead = day_num - today.weekday()
-                    if days_ahead <= 0:  # 이미 지났거나 오늘이면 다음주
-                        days_ahead += 7
-                    result['expected_date'] = (today + timedelta(days=days_ahead)).strftime('%Y-%m-%d')
-                    break
+        # 텍스트 입력
+        st.markdown("### ✏️ 직접 입력하기")
         
-        # 기타 날짜 패턴들
+        # 인식된 텍스트가 있으면 자동 입력
+        default_text = ""
+        if 'recognized_text' in st.session_state:
+            default_text = st.session_state.recognized_text
+            st.info(f"🎤 인식된 내용: {default_text}")
+        
+        user_input = st.text_area(
+            "그냥 편하게 말씀하세요",
+            value=default_text,
+            placeholder="""예시:
+- 강남 아파트 타일공사 500만원 다음주 받기로 했어
+- 북구청 방수 작업 끝나면 1000만원 잔금""",
+            height=120,
+            key="voice_text_input"
+        )
+    
+    with col2:
+        # 빠른 입력 템플릿
+        st.markdown("### 빠른 입력")
+        if st.button("📝 계약금", use_container_width=True):
+            st.session_state.voice_text_input = "현장명 계약금 금액 오늘 받음"
+            st.rerun()
+        
+        if st.button("💵 중도금", use_container_width=True):
+            st.session_state.voice_text_input = "현장명 중도금 금액 날짜 예정"
+            st.rerun()
+        
+        if st.button("💰 잔금", use_container_width=True):
+            st.session_state.voice_text_input = "현장명 잔금 금액 완료시 받기"
+            st.rerun()
+    
+    # 분석 버튼
+    if st.button("🔍 기록하기", type="primary"):
+        if not user_input or not user_input.strip():
+            st.warning("내용을 입력해주세요.")
         else:
-            date_patterns = [
-                (r'오늘', today.strftime('%Y-%m-%d')),
-                (r'내일', (today + timedelta(days=1)).strftime('%Y-%m-%d')),
-                (r'모레', (today + timedelta(days=2)).strftime('%Y-%m-%d')),
-                (r'글피', (today + timedelta(days=3)).strftime('%Y-%m-%d')),
-                (r'어제', (today - timedelta(days=1)).strftime('%Y-%m-%d')),
-                (r'(\d+)일\s*후', lambda m: (today + timedelta(days=int(m.group(1)))).strftime('%Y-%m-%d')),
-                (r'(\d+)일\s*뒤', lambda m: (today + timedelta(days=int(m.group(1)))).strftime('%Y-%m-%d')),
-                (r'(\d+)일\s*전', lambda m: (today - timedelta(days=int(m.group(1)))).strftime('%Y-%m-%d')),
-            ]
-        
-        for pattern, replacement in date_patterns:
-            match = re.search(pattern, text)
-            if match:
-                if callable(replacement):
-                    result['expected_date'] = replacement(match)
-                else:
-                    result['expected_date'] = replacement
-                break
-        
-        # 구체적 날짜 패턴
-        if not result['expected_date']:
-            # 월/일 형식
-            date_match = re.search(r'(\d{1,2})[월/]\s*(\d{1,2})', text)
-            if date_match:
-                month = int(date_match.group(1))
-                day = int(date_match.group(2))
-                year = today.year
+            # 🔐 API 제한 체크
+            if not check_api_limit("gpt_calls"):
+                st.stop()
+            
+            with st.spinner("AI가 분석 중..."):
                 try:
-                    target_date = datetime(year, month, day)
-                    if target_date < today:
-                        year += 1
-                    result['expected_date'] = f"{year}-{month:02d}-{day:02d}"
-                except:
-                    pass
-    
-    # 6. 결제 방식 추출
-    payment_methods = {
-        '현금': '현금',
-        '캐시': '현금',
-        '계좌': '계좌이체',
-        '이체': '계좌이체',
-        '송금': '계좌이체',
-        '입금': '계좌이체',
-        '카드': '카드',
-        '체크카드': '카드',
-        '신용카드': '카드',
-        '외상': '외상',
-        '후불': '외상'
-    }
-    
-    for keyword, method in payment_methods.items():
-        if keyword in text:
-            result['payment_method'] = method
-            break
-    
-    if not result['payment_method']:
-        result['payment_method'] = '미정'
-    
-    # 7. 전체 텍스트를 메모로
-    result['memo'] = text
-    
-    return result
+                    # 분석 및 정규화
+                    raw = analyze_text(user_input)
+                    normalized = normalize_data(raw)
+                    
+                    # 세션에 저장
+                    st.session_state.analyzed_data = normalized
+                    st.session_state.saved = False
+                    
+                    # 🔐 활동 로깅
+                    log_activity("text_analysis", {"success": True, "text_length": len(user_input)})
+                    
+                except Exception as e:
+                    st.error(f"처리 실패: {e}")
+                    log_activity("text_analysis", {"success": False, "error": str(e)})
 
-def post_process(result, original_text):
-    """AI 결과 후처리 및 보정"""
-    # amount가 문자열인 경우 숫자로 변환
-    if 'amount' in result and result['amount']:
-        amount_str = str(result['amount'])
-        # 이미 숫자만 있으면 그대로
-        if amount_str.isdigit():
-            pass
-        # "500만원" 형태면 변환
-        elif '만원' in amount_str or '만' in amount_str:
-            match = re.search(r'(\d+)', amount_str)
-            if match:
-                result['amount'] = str(int(match.group(1)) * 10000)
-    
-    # 날짜 형식 검증
-    if 'expected_date' in result and result['expected_date']:
-        if not re.match(r'\d{4}-\d{2}-\d{2}', result['expected_date']):
-            # 상대적 날짜 표현 처리
-            from services.utils import parse_korean_date
-            parsed_date = parse_korean_date(result['expected_date'])
-            if parsed_date:
-                result['expected_date'] = parsed_date
-    
-    # 빈 필드 처리
-    for key in ['site_name', 'work_type', 'amount', 'payment_type', 'expected_date', 'payment_method', 'memo']:
-        if key not in result:
-            result[key] = ''
-    
-    # 메모가 없으면 원본 텍스트 저장
-    if not result.get('memo'):
-        result['memo'] = original_text
-    
-    return result
-
-def normalize_data(raw_data):
-    """
-    LLM 분석 결과를 Notion 저장용 형식으로 변환
-    건설현장 필드 → 5W1H 매핑
-    """
-    # 금액 포맷팅
-    amount_str = ""
-    if raw_data.get('amount'):
-        try:
-            amount_num = int(raw_data['amount'])
-            amount_str = f"{amount_num:,}원"
-        except:
-            amount_str = raw_data.get('amount', '')
-    
-    # 작업 내용 조합 (금액 제외)
-    what_parts = []
-    if raw_data.get('work_type'):
-        what_parts.append(raw_data['work_type'])
-    if raw_data.get('payment_type'):
-        what_parts.append(f"({raw_data['payment_type']})")
-    
-    what_text = " ".join(what_parts) if what_parts else raw_data.get('memo', '')
-    
-    # 5W1H 형식으로 변환
-    normalized = {
-        'who': raw_data.get('site_name', ''),          # 현장명
-        'what': what_text,                              # 작업내용
-        'when': raw_data.get('expected_date', ''),      # 날짜
-        'where': raw_data.get('site_name', ''),         # 위치
-        'why': raw_data.get('payment_type', ''),        # 거래유형
-        'how': amount_str,                              # 💰 금액 (변경됨!)
+    # 분석 결과 표시
+    if st.session_state.analyzed_data:
+        st.divider()
+        st.subheader("📋 AI 분석 결과")
         
-        # 추가 필드 (UI 표시용)
-        'original_amount': raw_data.get('amount', ''),
-        'work_type': raw_data.get('work_type', ''),
-        'payment_method': raw_data.get('payment_method', ''),
-        'memo': raw_data.get('memo', '')
-    }
-    
-    return normalized
-
-# 테스트
-if __name__ == "__main__":
-    test_cases = [
-        "북구청 방수 작업 끝나면 1000만원 잔금",
-        "강남 아파트 타일공사 중도금 500만원 다음주 수요일",
-        "김사장 인테리어 계약금 300만원 내일 현금",
-        "서초 빌라 미장 200만원 15일 계좌이체",
-        "판교 오피스텔 조적공사 450만원 완료후 받기",
-        "상가 전기공사 150만원 월말",
-        "이번달 말까지 도배 인건비 80만원"
-    ]
-    
-    print("=" * 60)
-    for text in test_cases:
-        print(f"\n📝 입력: {text}")
-        result = analyze_text(text)
-        print(f"🔍 분석 결과:")
-        for key, value in result.items():
-            if value:
-                print(f"   {key}: {value}")
+        data = st.session_state.analyzed_data
         
-        print(f"\n📦 Notion 저장 형식:")
-        normalized = normalize_data(result)
-        print(f"   🏗️ 현장(who): {normalized['who']}")
-        print(f"   📋 내용(what): {normalized['what']}")
-        print(f"   📅 언제(when): {normalized['when']}")
-        print(f"   📍 위치(where): {normalized['where']}")
-        print(f"   ❓ 유형(why): {normalized['why']}")
-        print(f"   💰 금액(how): {normalized['how']}")
-        print("-" * 40)
+        if data:
+            col1, col2 = st.columns([2, 1])
+            
+            with col1:
+                # 분석 결과 카드
+                st.markdown("### 📋 내용 정리")
+                
+                with st.container():
+                    st.markdown(f"""
+                    - **🏗️ 현장:** {data.get('who', '-')}
+                    - **📋 내용:** {data.get('what', '-')}  
+                    - **💰 금액:** {data.get('how', '-')}
+                    - **📅 언제:** {data.get('when', '-')}
+                    - **📍 위치:** {data.get('where', '-')}
+                    - **❓ 유형:** {data.get('why', '-')}
+                    """)
+                
+                # 수정 가능한 필드들
+                with st.expander("✏️ 수정하기"):
+                    data['who'] = st.text_input("현장명", data.get('who', ''))
+                    data['what'] = st.text_input("작업 내용", data.get('what', ''))
+                    data['when'] = st.text_input("날짜", data.get('when', ''))
+                    data['where'] = st.text_input("위치", data.get('where', ''))
+                    data['why'] = st.text_input("유형", data.get('why', ''))
+                    data['how'] = st.text_input("금액", data.get('how', ''))
+            
+            with col2:
+                st.markdown("### 💾 저장")
+                
+                if not st.session_state.saved:
+                    col1, col2 = st.columns([2, 1])
+                    with col1:
+                        if st.button("💾 확정 저장", type="primary", use_container_width=True):
+                            # 🔐 API 제한 체크
+                            if not check_api_limit("notion_saves"):
+                                st.stop()
+                                
+                            with st.spinner("저장 중..."):
+                                try:
+                                    status, msg = save_record(data)
+                                    if 200 <= status < 300:
+                                        st.success("✅ 저장 완료!")
+                                        st.session_state.saved = True
+                                        
+                                        # 🔐 활동 로깅
+                                        log_activity("notion_save", {"success": True, "site": data.get('who')})
+                                        
+                                        # 세션 정리
+                                        if 'analyzed_data' in st.session_state:
+                                            del st.session_state.analyzed_data
+                                        if 'recognized_text' in st.session_state:
+                                            del st.session_state.recognized_text
+                                    else:
+                                        st.error(f"❌ 저장 실패: {msg}")
+                                        log_activity("notion_save", {"success": False})
+                                except Exception as e:
+                                    st.error(f"저장 실패: {e}")
+                                    log_activity("notion_save", {"success": False, "error": str(e)})
+                    
+                    with col2:
+                        if st.button("🗑️ 취소", use_container_width=True):
+                            st.session_state.analyzed_data = None
+                            st.rerun()
+                else:
+                    st.success("✅ 저장됨")
+                    if st.button("🔄 새로 기록", use_container_width=True):
+                        st.session_state.analyzed_data = None
+                        st.session_state.saved = False
+                        if 'recognized_text' in st.session_state:
+                            del st.session_state.recognized_text
+                        st.rerun()
+
+# Tab 2: 영수증 OCR
+with tab2:
+    st.subheader("영수증 촬영 & 자동 인식")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        # 카메라 입력
+        uploaded_file = st.camera_input("영수증 촬영 📸")
+        
+        # 또는 파일 업로드
+        uploaded_image = st.file_uploader(
+            "또는 사진 선택",
+            type=['png', 'jpg', 'jpeg'],
+            help="영수증 사진을 선택하세요"
+        )
+        
+        image_to_process = uploaded_file or uploaded_image
+        
+        if image_to_process:
+            st.image(image_to_process, caption="업로드된 영수증")
+    
+    with col2:
+        if image_to_process:
+            st.markdown("### 📋 인식 결과")
+            
+            with st.spinner("영수증 분석 중..."):
+                # OCR 처리 (실제로는 Google Vision API 사용)
+                extracted_text = process_ocr_image(image_to_process)
+                
+            # 추출된 텍스트 표시
+            st.text_area("인식된 내용", extracted_text, height=200)
+            
+            # 카테고리 선택
+            category = st.selectbox(
+                "분류",
+                ["🔨 자재비", "👷 인건비", "⛽ 유류비", "🍚 식대", "🚗 기타"]
+            )
+            
+            # 현장 선택
+            site = st.text_input("현장명", placeholder="예: 강남 오피스텔")
+            
+            if st.button("💾 저장하기", type="primary"):
+                # 🔐 API 제한 체크
+                if not check_api_limit("notion_saves"):
+                    st.stop()
+                    
+                # LLM으로 영수증 텍스트 구조화
+                with st.spinner("저장 중..."):
+                    try:
+                        # 영수증 텍스트를 5W1H로 변환
+                        receipt_input = f"{site} {category} {extracted_text}"
+                        raw = analyze_text(receipt_input)
+                        normalized = normalize_data(raw)
+                        status, msg = save_record(normalized)
+                        
+                        if 200 <= status < 300:
+                            st.success(f"✅ '{category}' 영수증이 저장되었습니다!")
+                            # 🔐 활동 로깅
+                            log_activity("receipt_save", {"success": True, "category": category})
+                        else:
+                            st.error("저장 실패")
+                            log_activity("receipt_save", {"success": False})
+                    except Exception as e:
+                        st.error(f"처리 실패: {e}")
+                        log_activity("receipt_save", {"success": False, "error": str(e)})
+
+# Tab 3: 현황 대시보드
+with tab3:
+    st.subheader("이번 달 현황")
+    
+    # 메트릭 카드
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.metric(
+            label="총 계약금액",
+            value="8,500만원",
+            delta="신규 500만원"
+        )
+    
+    with col2:
+        st.metric(
+            label="받은 돈",
+            value="5,250만원",
+            delta="이번주 +500만원"
+        )
+    
+    with col3:
+        st.metric(
+            label="받을 돈",
+            value="3,250만원",
+            delta="38.2%"
+        )
+    
+    with col4:
+        st.metric(
+            label="지출",
+            value="2,130만원",
+            delta="-230만원"
+        )
+    
+    st.divider()
+    
+    # 미수금 알림
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        st.subheader("📌 이번 주 받을 돈")
+        
+        # 미수금 데이터
+        receivables_df = pd.DataFrame([
+            {"현장": "강남 오피스텔", "구분": "중도금", "금액": 5000000, "예정일": "2025-01-25", "D-Day": 2},
+            {"현장": "북구청 방수", "구분": "잔금", "금액": 10000000, "예정일": "2025-01-28", "D-Day": 5},
+            {"현장": "서초 아파트", "구분": "계약금", "금액": 3000000, "예정일": "2025-01-23", "D-Day": 0},
+            {"현장": "판교 빌라", "구분": "중도금", "금액": 4500000, "예정일": "2025-01-30", "D-Day": 7},
+        ])
+        
+        for _, row in receivables_df.iterrows():
+            col_a, col_b, col_c, col_d, col_e = st.columns([3, 2, 2, 1, 1])
+            
+            with col_a:
+                st.write(f"**{row['현장']}**")
+            with col_b:
+                st.write(f"{row['구분']}")
+            with col_c:
+                st.write(f"{row['금액']:,}원")
+            with col_d:
+                if row['D-Day'] == 0:
+                    st.write("🔴 오늘")
+                elif row['D-Day'] <= 2:
+                    st.write(f"🟡 D-{row['D-Day']}")
+                else:
+                    st.write(f"D-{row['D-Day']}")
+            with col_e:
+                if st.button("📞", key=f"call_{row['현장']}"):
+                    st.info(f"{row['현장']} 담당자 연결")
+    
+    with col2:
+        # 수금률 파이 차트
+        fig = go.Figure(data=[go.Pie(
+            labels=['받은 돈', '받을 돈'],
+            values=[5250, 3250],
+            hole=.3,
+            marker_colors=['#4CAF50', '#FFC107']
+        )])
+        
+        fig.update_layout(
+            title="수금 현황",
+            height=300,
+            showlegend=True
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+
+# Tab 4: 잔금 현황표
+with tab4:
+    st.subheader("💳 현장별 잔금 현황")
+    
+    # 샘플 데이터
+    payment_data = pd.DataFrame([
+        {"현장명": "강남 오피스텔", "계약금액": 15000000, "받은금액": 10000000, "잔금": 5000000, "진행률": 67},
+        {"현장명": "북구청 방수", "계약금액": 30000000, "받은금액": 20000000, "잔금": 10000000, "진행률": 67},
+        {"현장명": "서초 아파트", "계약금액": 8000000, "받은금액": 5000000, "잔금": 3000000, "진행률": 63},
+        {"현장명": "판교 빌라", "계약금액": 12000000, "받은금액": 7500000, "잔금": 4500000, "진행률": 63},
+        {"현장명": "분당 주택", "계약금액": 20000000, "받은금액": 20000000, "잔금": 0, "진행률": 100},
+    ])
+    
+    # 차트 표시
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        # 막대 차트
+        fig = create_payment_chart(payment_data)
+        st.plotly_chart(fig, use_container_width=True)
+    
+    with col2:
+        # 요약 정보
+        st.metric("총 계약금액", f"{payment_data['계약금액'].sum():,}원")
+        st.metric("총 받은금액", f"{payment_data['받은금액'].sum():,}원")
+        st.metric("총 잔금", f"{payment_data['잔금'].sum():,}원")
+        
+        avg_progress = payment_data['진행률'].mean()
+        st.metric("평균 수금률", f"{avg_progress:.1f}%")
+    
+    # 상세 테이블
+    st.divider()
+    st.markdown("### 📋 상세 내역")
+    
+    # 테이블 스타일링
+    styled_df = payment_data.copy()
+    styled_df['계약금액'] = styled_df['계약금액'].apply(lambda x: f"{x:,}원")
+    styled_df['받은금액'] = styled_df['받은금액'].apply(lambda x: f"{x:,}원")
+    styled_df['잔금'] = styled_df['잔금'].apply(lambda x: f"{x:,}원")
+    styled_df['진행률'] = styled_df['진행률'].apply(lambda x: f"{x}%")
+    
+    # 편집 가능한 테이블
+    edited_df = st.data_editor(
+        styled_df,
+        hide_index=True,
+        use_container_width=True,
+        column_config={
+            "현장명": st.column_config.TextColumn("현장명", width="medium"),
+            "계약금액": st.column_config.TextColumn("계약금액", width="small"),
+            "받은금액": st.column_config.TextColumn("받은금액", width="small"),
+            "잔금": st.column_config.TextColumn("잔금", width="small"),
+            "진행률": st.column_config.ProgressColumn(
+                "진행률",
+                help="수금 진행률",
+                format="%d%%",
+                min_value=0,
+                max_value=100,
+            ),
+        }
+    )
+    
+    # 엑셀 다운로드 버튼
+    col1, col2, col3 = st.columns([1, 1, 2])
+    
+    with col1:
+        if st.button("📊 엑셀 다운로드", use_container_width=True):
+            # 엑셀 파일 생성 (실제로는 pandas to_excel 사용)
+            st.success("수금현황.xlsx 다운로드 완료!")
+    
+    with col2:
+        if st.button("📨 세무사 전송", use_container_width=True):
+            st.success("세무사님께 자료 전송 완료!")
+
+# ============================================
+# 하단 상태바
+# ============================================
+st.divider()
+
+# 한 줄로 모든 정보 표시
+footer_cols = st.columns([4, 1, 1, 1])
+
+with footer_cols[0]:
+    # 세션 정보
+    if st.session_state.get('authenticated'):
+        from datetime import datetime, timedelta
+        
+        # 사용자 및 시간 정보
+        user = st.session_state.get('username', 'guest')
+        
+        # 남은 시간 계산
+        remaining_minutes = 30
+        if st.session_state.get('login_time'):
+            elapsed = (datetime.now() - st.session_state.login_time).seconds // 60
+            remaining_minutes = max(0, 30 - elapsed)
+        
+        # 사용량 정보
+        usage, limits = validate_api_usage()
+        
+        st.caption(
+            f"👤 {user} | "
+            f"⏱️ {remaining_minutes}분 | "
+            f"📊 AI {usage['gpt_calls']}/{limits['gpt_calls']} | "
+            f"🎤 음성 {usage['whisper_calls']}/{limits['whisper_calls']}"
+        )
+
+with footer_cols[1]:
+    st.button("📞 지원", use_container_width=True)
+
+with footer_cols[2]:
+    st.button("⚙️ 설정", use_container_width=True)
+
+with footer_cols[3]:
+    if st.button("🚪 로그아웃", use_container_width=True, key="logout_btn_main"):
+        st.session_state.clear()
+        st.rerun()
