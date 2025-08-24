@@ -168,13 +168,13 @@ with tab1:
             
             with col_rec1:
                 if not st.session_state.is_recording:
-                    if st.button("🔴 녹음 시작", use_container_width=True, key="start_rec", type="secondary"):
+                    if st.button("🔴 녹음 시작", use_container_width=True, key="start_recording_btn", type="secondary"):
                         st.session_state.is_recording = True
                         st.rerun()
             
             with col_rec2:
                 if st.session_state.is_recording:
-                    if st.button("⏹️ 녹음 중지", use_container_width=True, key="stop_rec", type="secondary"):
+                    if st.button("⏹️ 녹음 중지", use_container_width=True, key="stop_recording_btn", type="secondary"):
                         st.session_state.is_recording = False
                         st.rerun()
             
@@ -194,7 +194,7 @@ with tab1:
                         icon_name="microphone",
                         icon_size="2x",
                         pause_threshold=30.0,  # 30초로 늘림
-                        key="hidden_recorder"
+                        key="audio_recorder_widget"
                     )
                     
                     if audio_bytes:
@@ -211,7 +211,7 @@ with tab1:
                 col_ai1, col_ai2, col_ai3 = st.columns([1, 1, 1])
                 
                 with col_ai1:
-                    if st.button("🤖 **AI 인식**", type="primary", use_container_width=True, key="ai_recognize"):
+                    if st.button("🤖 **AI 인식**", type="primary", use_container_width=True, key="ai_recognize_btn"):
                         # 🔐 API 제한 체크
                         if not check_api_limit("whisper_calls"):
                             st.stop()
@@ -221,6 +221,7 @@ with tab1:
                                 from openai import OpenAI
                                 import tempfile
                                 import os
+                                import time
                                 
                                 # OpenAI 클라이언트
                                 api_key = st.secrets.get("OPENAI_API_KEY", os.getenv("OPENAI_API_KEY"))
@@ -275,13 +276,13 @@ with tab1:
                                 log_activity("voice_recognition", {"success": False, "error": str(e)})
                 
                 with col_ai2:
-                    if st.button("🔄 다시 녹음", use_container_width=True, key="re_record"):
+                    if st.button("🔄 다시 녹음", use_container_width=True, key="re_record_btn"):
                         st.session_state.audio_data = None
                         st.session_state.is_recording = False
                         st.rerun()
                 
                 with col_ai3:
-                    if st.button("🗑️ 취소", use_container_width=True, key="cancel_record"):
+                    if st.button("🗑️ 취소", use_container_width=True, key="cancel_record_btn"):
                         st.session_state.audio_data = None
                         st.session_state.is_recording = False
                         if 'recognized_text' in st.session_state:
@@ -295,7 +296,8 @@ with tab1:
             audio_file = st.file_uploader(
                 "녹음된 음성 파일을 선택하세요",
                 type=['wav', 'mp3', 'm4a', 'webm', 'ogg'],
-                help="스마트폰이나 컴퓨터로 녹음한 파일을 업로드하세요"
+                help="스마트폰이나 컴퓨터로 녹음한 파일을 업로드하세요",
+                key="audio_file_uploader"
             )
             
             if audio_file:
@@ -303,11 +305,12 @@ with tab1:
                 
                 col_up1, col_up2 = st.columns([1, 2])
                 with col_up1:
-                    if st.button("🤖 **AI 음성 인식**", type="primary", use_container_width=True):
+                    if st.button("🤖 **AI 음성 인식**", type="primary", use_container_width=True, key="ai_recognize_upload_btn"):
                         with st.spinner("🎧 음성 인식 중..."):
                             try:
                                 from openai import OpenAI
                                 import tempfile
+                                import time
                                 
                                 api_key = st.secrets.get("OPENAI_API_KEY", os.getenv("OPENAI_API_KEY"))
                                 client = OpenAI(api_key=api_key)
