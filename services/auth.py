@@ -6,26 +6,35 @@ import time
 from datetime import datetime, timedelta
 
 def check_password():
-    """비밀번호 확인 및 세션 관리"""
-    
-    # 비밀번호 설정 (Streamlit secrets에 저장)
-    def password_correct():
-        """비밀번호가 맞는지 확인"""
-        # secrets.toml에 저장된 비밀번호
-        correct_password = st.secrets.get("APP_PASSWORD", "maumda2025")
-        correct_username = st.secrets.get("APP_USERNAME", "admin")
-        
-        # 입력된 값과 비교
-        entered_username = st.session_state.get("username", "")
-        entered_password = st.session_state.get("password", "")
-        
-        # 해시 비교 (보안 강화)
-        password_hash = hashlib.sha256(entered_password.encode()).hexdigest()
-        correct_hash = hashlib.sha256(correct_password.encode()).hexdigest()
-        
-        if entered_username == correct_username and password_hash == correct_hash:
-            return True
+    """Returns `True` if the user had the correct password."""
+
+    def password_entered():
+        """Checks whether a password entered by the user is correct."""
+        if st.session_state["password"] == st.secrets["password"]:
+            st.session_state["password_correct"] = True
+            del st.session_state["password"]  # 비밀번호를 세션에서 삭제
+        else:
+            st.session_state["password_correct"] = False
+
+    if "password_correct" not in st.session_state:
+        # 첫 실행이거나 비밀번호가 아직 검증되지 않음
+        st.text_input(
+            "Password", type="password", on_change=password_entered, key="password"
+        )
         return False
+    elif not st.session_state["password_correct"]:
+        # 비밀번호가 틀림
+        st.text_input(
+            "Password", type="password", on_change=password_entered, key="password"
+        )
+        st.error("😕 Password incorrect")
+        return False
+    else:
+        # 비밀번호가 맞음
+        return True
+
+if check_password():
+    st.write("🎈 여기에 메인 앱 내용을 작성하세요!")
     
     # 이미 로그인되어 있는지 확인
     if "authenticated" not in st.session_state:
@@ -67,7 +76,7 @@ def check_password():
                 submitted = st.form_submit_button("🔓 로그인", use_container_width=True)
             
             if submitted:
-                if password_correct():
+                if check_password():
                     st.session_state.authenticated = True
                     st.session_state.login_time = datetime.now()
                     st.success("✅ 로그인 성공!")
@@ -84,7 +93,8 @@ def check_password():
             📞 문의: 010-XXXX-XXXX
         """)
         
-        return False
+        # 로그인 실패 시 이후 코드 실행 방지
+        st.stop()
     
     # 로그아웃 버튼
     col1, col2, col3 = st.columns([6, 1, 1])
@@ -103,8 +113,6 @@ def check_password():
                 minutes = int(remaining.total_seconds() / 60)
                 st.caption(f"⏱️ {minutes}분")
     
-    return True
-
 def get_user_id():
     """현재 로그인한 사용자 ID 반환"""
     if st.session_state.get("authenticated"):
