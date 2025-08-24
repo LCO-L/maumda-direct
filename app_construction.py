@@ -138,71 +138,198 @@ with tab1:
         # 음성 입력 섹션
         st.markdown("### 🎤 음성으로 입력하기")
         
+        # 사용 안내
+        with st.expander("💡 음성 입력 사용법", expanded=False):
+            st.info("""
+            **🎙️ 녹음 방법:**
+            1. 아래 **🔴 녹음 시작** 버튼을 클릭하세요
+            2. 편하게 말씀하세요 (예: "강남 아파트 타일공사 500만원 다음주")
+            3. 말이 끝나면 **⏹️ 녹음 중지** 버튼을 클릭하세요
+            4. **🤖 AI 인식** 버튼으로 텍스트 변환
+            
+            **💬 말하기 예시:**
+            - "북구청 방수 작업 끝나면 천만원 잔금"
+            - "김사장 인테리어 삼백만원 내일 계약금"
+            - "서초 빌라 미장 이백만원 다음주 수요일"
+            """)
+        
         # audio_bytes 초기화
         audio_bytes = None
+        
+        # 세션 상태로 녹음 상태 관리
+        if 'is_recording' not in st.session_state:
+            st.session_state.is_recording = False
         
         # 음성 녹음 시도
         try:
             from audio_recorder_streamlit import audio_recorder
             
-            # 녹음 버튼
-            audio_bytes = audio_recorder(
-                text="🔴 녹음 시작 (클릭)",
-                recording_color="#FF0000",
-                neutral_color="#4CAF50",
-                icon_name="microphone",
-                icon_size="3x",
-                pause_threshold=2.0
-            )
+            # 녹음 상태에 따른 UI 변경
+            if st.session_state.is_recording:
+                st.error("🔴 **녹음 중입니다... 말씀해 주세요!**")
+                recording_text = "⏹️ 녹음 중지"
+                recording_color = "#FF0000"
+                icon_name = "stop-circle"
+            else:
+                recording_text = "🔴 녹음 시작"
+                recording_color = "#4CAF50"
+                icon_name = "microphone"
             
+            # 녹음 버튼 (상태 표시 개선)
+            col_a, col_b = st.columns([2, 3])
+            
+            with col_a:
+                audio_bytes = audio_recorder(
+                    text=recording_text,
+                    recording_color=recording_color,
+                    neutral_color="#4CAF50",
+                    icon_name=icon_name,
+                    icon_size="3x",
+                    pause_threshold=3.0,  # 3초 침묵시 자동 정지
+                    key="audio_recorder_main"
+                )
+            
+            with col_b:
+                if st.session_state.is_recording:
+                    st.markdown("""
+                    <div style='padding: 10px; background-color: #ffebee; border-radius: 5px;'>
+                    <p style='margin: 0; color: #c62828;'>
+                    🎙️ <b>녹음 중...</b><br>
+                    편하게 말씀하세요
+                    </p>
+                    </div>
+                    """, unsafe_allow_html=True)
+                else:
+                    st.markdown("""
+                    <div style='padding: 10px; background-color: #e8f5e9; border-radius: 5px;'>
+                    <p style='margin: 0; color: #2e7d32;'>
+                    📍 <b>준비됨</b><br>
+                    녹음 버튼을 누르세요
+                    </p>
+                    </div>
+                    """, unsafe_allow_html=True)
+            
+            # 녹음 상태 토글
+            if audio_bytes and not st.session_state.is_recording:
+                st.session_state.is_recording = False
+                
             # 녹음된 오디오가 있을 때만 처리
             if audio_bytes:
+                st.success("✅ 녹음 완료!")
                 st.audio(audio_bytes, format="audio/wav")
                 
-                if st.button("🤖 AI 인식", type="primary"):
-                    # 🔐 API 제한 체크
-                    if not check_api_limit("whisper_calls"):
-                        st.stop()
-                    
-                    with st.spinner("인식 중..."):
+                col_1, col_2, col_3 = st.columns([2, 2, 1])
+                
+                with col_1:
+                    if st.button("🤖 AI 인식", type="primary", use_container_width=True):
+                        # 🔐 API 제한 체크
+                        if not check_api_limit("whisper_calls"):
+                            st.stop()
+                        
+                        with st.spinner("🎧 음성을 텍스트로 변환 중... (5~10초)"):
+                            try:
+                                from openai import OpenAI
+                                import tempfile
+                                import os
+                                
+                                # OpenAI 클라이언트
+                                api_key = st.secrets.get("OPENAI_API_KEY", os.getenv("OPENAI_API_KEY"))
+                                client = OpenAI(api_key=api_key)
+                                
+                                # 임시 파일 저장
+                                with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+                                    tmp.write(audio_bytes)
+                                    tmp_path = tmp.name
+                                
+                                # Progress bar 추가
+                                progress_bar = st.progress(0)
+                                progress_bar.progress(30, text="음성 파일 처리 중...")
+                                
+                                # Whisper API 호출
+                                with open(tmp_path, 'rb') as audio_file:
+                                    progress_bar.progress(60, text="AI 분석 중...")
+                                    transcript = client.audio.transcriptions.create(
+                                        model="whisper-1",
+                                        file=audio_file,
+                                        language="ko"
+                                    )
+                                
+                                progress_bar.progress(100, text="완료!")
+                                
+                                # 임시 파일 삭제
+                                os.unlink(tmp_path)
+                                
+                                # 결과 저장
+                                st.session_state.recognized_text = transcript.text
+                                st.success(f"✅ 인식 완료: \"{transcript.text}\"")
+                                
+                                # 자동으로 텍스트 입력창에 추가
+                                st.session_state.voice_text_input = transcript.text
+                                
+                                # Progress bar 제거
+                                progress_bar.empty()
+                                
+                                # 🔐 활동 로깅
+                                log_activity("voice_recognition", {"success": True, "text_length": len(transcript.text)})
+                                
+                                # 페이지 새로고침으로 텍스트 반영
+                                st.rerun()
+                                
+                            except Exception as e:
+                                st.error(f"❌ 인식 실패: {e}")
+                                log_activity("voice_recognition", {"success": False, "error": str(e)})
+                
+                with col_2:
+                    if st.button("🔄 다시 녹음", use_container_width=True):
+                        st.session_state.is_recording = False
+                        st.rerun()
+        
+        except ImportError:
+            # 대체 음성 입력 방법
+            st.warning("🎤 실시간 녹음 기능을 사용할 수 없습니다.")
+            
+            # 파일 업로드 방식
+            st.markdown("#### 📁 음성 파일 업로드")
+            audio_file = st.file_uploader(
+                "녹음된 음성 파일을 선택하세요",
+                type=['wav', 'mp3', 'm4a', 'webm'],
+                help="스마트폰이나 컴퓨터로 녹음한 파일을 업로드하세요"
+            )
+            
+            if audio_file:
+                st.audio(audio_file)
+                
+                if st.button("🤖 AI 음성 인식", type="primary"):
+                    with st.spinner("🎧 음성 인식 중..."):
                         try:
                             from openai import OpenAI
                             import tempfile
-                            import os
                             
-                            # OpenAI 클라이언트
                             api_key = st.secrets.get("OPENAI_API_KEY", os.getenv("OPENAI_API_KEY"))
                             client = OpenAI(api_key=api_key)
                             
-                            # 임시 파일 저장
-                            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
-                                tmp.write(audio_bytes)
+                            # 파일 저장
+                            with tempfile.NamedTemporaryFile(suffix=f".{audio_file.name.split('.')[-1]}", delete=False) as tmp:
+                                tmp.write(audio_file.read())
                                 tmp_path = tmp.name
                             
-                            # Whisper API 호출
-                            with open(tmp_path, 'rb') as audio_file:
+                            # Whisper API
+                            with open(tmp_path, 'rb') as f:
                                 transcript = client.audio.transcriptions.create(
                                     model="whisper-1",
-                                    file=audio_file,
+                                    file=f,
                                     language="ko"
                                 )
                             
-                            # 임시 파일 삭제
                             os.unlink(tmp_path)
                             
-                            # 결과 저장
                             st.session_state.recognized_text = transcript.text
-                            st.success("✅ 인식 완료!")
-                            
-                            # 🔐 활동 로깅
-                            log_activity("voice_recognition", {"success": True, "text_length": len(transcript.text)})
+                            st.session_state.voice_text_input = transcript.text
+                            st.success(f"✅ 인식 완료: \"{transcript.text}\"")
+                            st.rerun()
                             
                         except Exception as e:
                             st.error(f"인식 실패: {e}")
-                            log_activity("voice_recognition", {"success": False, "error": str(e)})
-        
-        except ImportError:
-            st.info("🎤 음성 녹음 기능이 준비 중입니다. 아래 텍스트 입력을 사용해주세요.")
         
         # 텍스트 입력
         st.markdown("### ✏️ 직접 입력하기")
