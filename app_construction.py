@@ -525,9 +525,15 @@ with tab1:
         
         # 인식된 텍스트가 있으면 자동 입력
         default_text = ""
-        if 'recognized_text' in st.session_state:
+        if 'recognized_text' in st.session_state and st.session_state.recognized_text:
             default_text = st.session_state.recognized_text
-            st.info(f"🎤 인식된 내용: {default_text}")
+            st.success(f"🎤 인식된 내용이 아래에 자동 입력되었습니다!")
+            # 인식 후 세션에서 제거하여 중복 방지
+            del st.session_state.recognized_text
+        
+        # voice_text_input 세션 값 확인
+        if 'voice_text_input' in st.session_state and st.session_state.voice_text_input:
+            default_text = st.session_state.voice_text_input
         
         user_input = st.text_area(
             "그냥 편하게 말씀하세요",
@@ -536,7 +542,7 @@ with tab1:
 - 강남 아파트 타일공사 500만원 다음주 받기로 했어
 - 북구청 방수 작업 끝나면 1000만원 잔금""",
             height=120,
-            key="voice_text_input"
+            key="main_text_input"  # key 변경
         )
     
     with col2:
