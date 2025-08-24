@@ -200,22 +200,8 @@ with tab1:
                     if audio_bytes:
                         st.session_state.audio_data = audio_bytes
                         st.session_state.is_recording = False
-                        st.rerun()
-            
-            # 녹음된 오디오 처리
-            if st.session_state.audio_data:
-                st.divider()
-                st.success("✅ 녹음 완료!")
-                st.audio(st.session_state.audio_data, format="audio/wav")
-                
-                col_ai1, col_ai2, col_ai3 = st.columns([1, 1, 1])
-                
-                with col_ai1:
-                    if st.button("🤖 **AI 인식**", type="primary", use_container_width=True, key="ai_recognize_btn"):
-                        # 🔐 API 제한 체크
-                        if not check_api_limit("whisper_calls"):
-                            st.stop()
                         
+                        # 🔥 자동으로 AI 인식 시작
                         with st.spinner("🎧 음성을 텍스트로 변환 중... (5~10초)"):
                             try:
                                 from openai import OpenAI
@@ -223,70 +209,98 @@ with tab1:
                                 import os
                                 import time
                                 
-                                # OpenAI 클라이언트
+                                # API 제한 체크
+                                if check_api_limit("whisper_calls"):
+                                    # OpenAI 클라이언트
+                                    api_key = st.secrets.get("OPENAI_API_KEY", os.getenv("OPENAI_API_KEY"))
+                                    client = OpenAI(api_key=api_key)
+                                    
+                                    # 임시 파일 저장
+                                    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+                                        tmp.write(audio_bytes)
+                                        tmp_path = tmp.name
+                                    
+                                    # Whisper API 호출
+                                    with open(tmp_path, 'rb') as audio_file:
+                                        transcript = client.audio.transcriptions.create(
+                                            model="whisper-1",
+                                            file=audio_file,
+                                            language="ko"
+                                        )
+                                    
+                                    # 임시 파일 삭제
+                                    os.unlink(tmp_path)
+                                    
+                                    # 결과 저장
+                                    st.session_state.recognized_text = transcript.text
+                                    st.session_state.voice_text_input = transcript.text
+                                    
+                                    # 인식 결과 표시
+                                    st.success(f"✅ 인식 완료!")
+                                    st.info(f"📝 **인식된 텍스트:** {transcript.text}")
+                                    
+                                    # 활동 로깅
+                                    log_activity("voice_recognition", {"success": True, "text_length": len(transcript.text)})
+                                    
+                                    # 오디오 데이터 삭제
+                                    st.session_state.audio_data = None
+                                    
+                                    # 1초 후 새로고침으로 텍스트 반영
+                                    time.sleep(1)
+                                    st.rerun()
+                                
+                            except Exception as e:
+                                st.error(f"❌ 인식 실패: {e}")
+                                log_activity("voice_recognition", {"success": False, "error": str(e)})
+                                # 실패시에도 오디오는 보관
+            
+            # 녹음된 오디오가 있지만 인식 실패한 경우 수동 버튼 제공
+            if st.session_state.audio_data and not st.session_state.is_recording:
+                st.divider()
+                st.warning("⚠️ 자동 인식이 실패했습니다. 아래 버튼을 눌러 다시 시도하세요.")
+                st.audio(st.session_state.audio_data, format="audio/wav")
+                
+                col_ai1, col_ai2 = st.columns([1, 1])
+                
+                with col_ai1:
+                    if st.button("🤖 **다시 인식**", type="primary", use_container_width=True, key="retry_recognize_btn"):
+                        with st.spinner("🎧 음성을 텍스트로 변환 중..."):
+                            try:
+                                from openai import OpenAI
+                                import tempfile
+                                import os
+                                import time
+                                
                                 api_key = st.secrets.get("OPENAI_API_KEY", os.getenv("OPENAI_API_KEY"))
                                 client = OpenAI(api_key=api_key)
                                 
-                                # 임시 파일 저장
                                 with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
                                     tmp.write(st.session_state.audio_data)
                                     tmp_path = tmp.name
                                 
-                                # Progress bar 추가
-                                progress_bar = st.progress(0)
-                                progress_bar.progress(30, text="음성 파일 처리 중...")
-                                
-                                # Whisper API 호출
                                 with open(tmp_path, 'rb') as audio_file:
-                                    progress_bar.progress(60, text="AI 분석 중...")
                                     transcript = client.audio.transcriptions.create(
                                         model="whisper-1",
                                         file=audio_file,
                                         language="ko"
                                     )
                                 
-                                progress_bar.progress(100, text="완료!")
-                                
-                                # 임시 파일 삭제
                                 os.unlink(tmp_path)
                                 
-                                # 결과 저장
                                 st.session_state.recognized_text = transcript.text
                                 st.session_state.voice_text_input = transcript.text
-                                
-                                # Progress bar 제거
-                                progress_bar.empty()
-                                
-                                # 인식 결과 표시
-                                st.success(f"✅ 인식 완료!")
-                                st.info(f"📝 **인식된 텍스트:** {transcript.text}")
-                                
-                                # 🔐 활동 로깅
-                                log_activity("voice_recognition", {"success": True, "text_length": len(transcript.text)})
-                                
-                                # 오디오 데이터 삭제
+                                st.success(f"✅ 인식 완료: {transcript.text}")
                                 st.session_state.audio_data = None
-                                
-                                # 페이지 새로고침으로 텍스트 반영
-                                time.sleep(2)  # 결과 확인 시간
+                                time.sleep(1)
                                 st.rerun()
                                 
                             except Exception as e:
-                                st.error(f"❌ 인식 실패: {e}")
-                                log_activity("voice_recognition", {"success": False, "error": str(e)})
+                                st.error(f"인식 실패: {e}")
                 
                 with col_ai2:
                     if st.button("🔄 다시 녹음", use_container_width=True, key="re_record_btn"):
                         st.session_state.audio_data = None
                         st.session_state.is_recording = False
-                        st.rerun()
-                
-                with col_ai3:
-                    if st.button("🗑️ 취소", use_container_width=True, key="cancel_record_btn"):
-                        st.session_state.audio_data = None
-                        st.session_state.is_recording = False
-                        if 'recognized_text' in st.session_state:
-                            del st.session_state.recognized_text
                         st.rerun()
         
         except ImportError:
@@ -303,42 +317,45 @@ with tab1:
             if audio_file:
                 st.audio(audio_file)
                 
-                col_up1, col_up2 = st.columns([1, 2])
-                with col_up1:
-                    if st.button("🤖 **AI 음성 인식**", type="primary", use_container_width=True, key="ai_recognize_upload_btn"):
-                        with st.spinner("🎧 음성 인식 중..."):
-                            try:
-                                from openai import OpenAI
-                                import tempfile
-                                import time
-                                
-                                api_key = st.secrets.get("OPENAI_API_KEY", os.getenv("OPENAI_API_KEY"))
-                                client = OpenAI(api_key=api_key)
-                                
-                                # 파일 저장
-                                with tempfile.NamedTemporaryFile(suffix=f".{audio_file.name.split('.')[-1]}", delete=False) as tmp:
-                                    tmp.write(audio_file.read())
-                                    tmp_path = tmp.name
-                                
-                                # Whisper API
-                                with open(tmp_path, 'rb') as f:
-                                    transcript = client.audio.transcriptions.create(
-                                        model="whisper-1",
-                                        file=f,
-                                        language="ko"
-                                    )
-                                
-                                os.unlink(tmp_path)
-                                
-                                st.session_state.recognized_text = transcript.text
-                                st.session_state.voice_text_input = transcript.text
-                                st.success(f"✅ 인식 완료!")
-                                st.info(f"📝 **인식된 텍스트:** {transcript.text}")
-                                time.sleep(2)
-                                st.rerun()
-                                
-                            except Exception as e:
-                                st.error(f"인식 실패: {e}")
+                # 파일 업로드시 자동 인식
+                with st.spinner("🎧 음성 인식 중..."):
+                    try:
+                        from openai import OpenAI
+                        import tempfile
+                        import time
+                        
+                        api_key = st.secrets.get("OPENAI_API_KEY", os.getenv("OPENAI_API_KEY"))
+                        client = OpenAI(api_key=api_key)
+                        
+                        # 파일을 바이트로 읽기
+                        audio_bytes = audio_file.read()
+                        
+                        # 임시 파일로 저장
+                        with tempfile.NamedTemporaryFile(suffix=f".{audio_file.name.split('.')[-1]}", delete=False) as tmp:
+                            tmp.write(audio_bytes)
+                            tmp_path = tmp.name
+                        
+                        # Whisper API
+                        with open(tmp_path, 'rb') as f:
+                            transcript = client.audio.transcriptions.create(
+                                model="whisper-1",
+                                file=f,
+                                language="ko"
+                            )
+                        
+                        os.unlink(tmp_path)
+                        
+                        # 자동으로 텍스트 입력란에 추가
+                        st.session_state.recognized_text = transcript.text
+                        st.session_state.voice_text_input = transcript.text
+                        st.success(f"✅ 인식 완료!")
+                        st.info(f"📝 **인식된 텍스트:** {transcript.text}")
+                        time.sleep(1)
+                        st.rerun()
+                        
+                    except Exception as e:
+                        st.error(f"❌ 인식 실패: {e}")
+                        st.info("음성 파일을 다시 업로드해주세요.")
         
         # time 모듈 import 추가 (필요한 경우)
         import time
