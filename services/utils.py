@@ -7,11 +7,11 @@ def parse_korean_date(date_str: str) -> str:
     한국어 날짜 표현을 ISO 8601 형식(YYYY-MM-DD)으로 변환
     
     예시:
-    - "오늘" → "2025-01-23"
-    - "내일" → "2025-01-24"
-    - "다음주 수요일" → "2025-01-29"
-    - "2025년 2월 15일" → "2025-02-15"
-    - "2/15" → "2025-02-15"
+    - "오늘" → "2025-08-25"
+    - "내일" → "2025-08-26"
+    - "다음주 수요일" → "2025-09-03"
+    - "2025년 9월 15일" → "2025-09-15"
+    - "9/15" → "2025-09-15"
     """
     if not date_str:
         return ""
@@ -32,6 +32,8 @@ def parse_korean_date(date_str: str) -> str:
         return (today + timedelta(days=2)).strftime("%Y-%m-%d")
     elif date_str == "어제":
         return (today - timedelta(days=1)).strftime("%Y-%m-%d")
+    elif date_str == "글피":
+        return (today + timedelta(days=3)).strftime("%Y-%m-%d")
     
     # 이번주/다음주 + 요일
     weekdays = {
@@ -39,6 +41,28 @@ def parse_korean_date(date_str: str) -> str:
         "금요일": 4, "토요일": 5, "일요일": 6
     }
     
+    # 다음주 처리
+    if "다음주" in date_str or "다음 주" in date_str:
+        current_weekday = today.weekday()
+        
+        # 다음주 월요일 계산
+        if current_weekday == 6:  # 일요일
+            days_to_next_monday = 1
+        else:
+            days_to_next_monday = 7 - current_weekday
+        
+        next_monday = today + timedelta(days=days_to_next_monday)
+        
+        # 특정 요일 찾기
+        for day_name, day_num in weekdays.items():
+            if day_name in date_str:
+                target_date = next_monday + timedelta(days=day_num)
+                return target_date.strftime("%Y-%m-%d")
+        
+        # 요일이 없으면 다음주 월요일
+        return next_monday.strftime("%Y-%m-%d")
+    
+    # 이번주 처리
     if "이번주" in date_str or "이번 주" in date_str:
         for day_name, day_num in weekdays.items():
             if day_name in date_str:
@@ -47,15 +71,6 @@ def parse_korean_date(date_str: str) -> str:
                 if days_ahead < 0:  # 이미 지난 경우 다음 주로
                     days_ahead += 7
                 return (today + timedelta(days=days_ahead)).strftime("%Y-%m-%d")
-    
-    if "다음주" in date_str or "다음 주" in date_str:
-        for day_name, day_num in weekdays.items():
-            if day_name in date_str:
-                # 다음 주의 특정 요일 계산
-                days_until_next_monday = 7 - today.weekday()
-                target_date = today + timedelta(days=days_until_next_monday)
-                days_to_target = day_num
-                return (target_date + timedelta(days=days_to_target)).strftime("%Y-%m-%d")
     
     # 요일만 있는 경우 (이번 주 또는 다음 주)
     for day_name, day_num in weekdays.items():
@@ -71,24 +86,33 @@ def parse_korean_date(date_str: str) -> str:
         days = int(match.group(1))
         return (today + timedelta(days=days)).strftime("%Y-%m-%d")
     
-    # 2025년 1월 23일 형식
+    # X일 전
+    match = re.search(r'(\d+)일\s*전', date_str)
+    if match:
+        days = int(match.group(1))
+        return (today - timedelta(days=days)).strftime("%Y-%m-%d")
+    
+    # 2025년 9월 15일 형식
     match = re.search(r'(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일', date_str)
     if match:
         year, month, day = match.groups()
         return f"{year}-{month.zfill(2)}-{day.zfill(2)}"
     
-    # 1월 23일 형식 (연도 없음 - 현재 연도 사용)
+    # 9월 15일 형식 (연도 없음 - 현재 연도 사용)
     match = re.search(r'(\d{1,2})월\s*(\d{1,2})일', date_str)
     if match:
         month, day = match.groups()
         year = today.year
         # 만약 날짜가 이미 지났다면 내년으로
-        target_date = datetime(year, int(month), int(day))
-        if target_date < today:
-            year += 1
+        try:
+            target_date = datetime(year, int(month), int(day))
+            if target_date < today:
+                year += 1
+        except:
+            pass
         return f"{year}-{month.zfill(2)}-{day.zfill(2)}"
     
-    # 1/23 또는 01-23 형식
+    # 9/15 또는 09-15 형식
     match = re.search(r'(\d{1,2})[/-](\d{1,2})', date_str)
     if match:
         month, day = match.groups()
@@ -102,7 +126,7 @@ def parse_korean_date(date_str: str) -> str:
             pass
         return f"{year}-{month.zfill(2)}-{day.zfill(2)}"
     
-    # 2025-01-23 형식 (이미 ISO지만 검증)
+    # 2025-09-15 형식 (이미 ISO지만 검증)
     match = re.search(r'(\d{4})[/-](\d{1,2})[/-](\d{1,2})', date_str)
     if match:
         year, month, day = match.groups()
@@ -211,40 +235,38 @@ def normalize_data(raw_data: dict) -> dict:
     normalized = raw_data.copy()
     
     # 날짜 변환
-    if 'when' in normalized and normalized['when']:
-        iso_date = parse_korean_date(normalized['when'])
+    if 'expected_date' in raw_data and raw_data['expected_date']:
+        iso_date = parse_korean_date(raw_data['expected_date'])
         if iso_date:
             normalized['when'] = iso_date
-            normalized['when_display'] = raw_data['when']  # 원래 표현 보관
         else:
-            # 변환 실패 시 when 필드 제거 (노션에서 에러 방지)
-            normalized['when_display'] = raw_data['when']
-            normalized['when'] = ""
+            normalized['when'] = raw_data['expected_date']
+    else:
+        normalized['when'] = ""
     
-    # 금액 정규화 (what 필드에 금액이 있는 경우)
-    if 'what' in normalized and normalized['what']:
-        what_text = normalized['what']
-        
-        # 금액 관련 키워드가 있으면 정규화
-        if any(keyword in what_text for keyword in ['원', '만', '천', '억', '백만']):
-            normalized['what_display'] = what_text  # 원래 표현 보관
-            
-            # 금액 부분만 추출하여 정규화
-            amount_match = re.search(r'(\d+(?:\.\d+)?)\s*(?:만|천만|백만|억)\s*원?', what_text)
-            if amount_match:
-                # 전체 매칭된 부분
-                full_match = amount_match.group(0)
-                # 정규화된 금액
-                normalized_amount = normalize_amount(full_match)
-                # 원본 텍스트에서 금액 부분을 정규화된 것으로 교체
-                normalized['what'] = what_text.replace(full_match, normalized_amount)
-            else:
-                # 숫자만 있는 경우도 처리
-                num_match = re.search(r'(\d+)\s*원?', what_text)
-                if num_match:
-                    full_match = num_match.group(0)
-                    normalized_amount = normalize_amount(full_match)
-                    normalized['what'] = what_text.replace(full_match, normalized_amount)
+    # 금액 정규화 (how 필드에 저장)
+    if 'amount' in raw_data and raw_data['amount']:
+        try:
+            amount_num = int(raw_data['amount'])
+            normalized['how'] = f"{amount_num:,}원"
+        except:
+            normalized['how'] = normalize_amount(str(raw_data['amount']))
+    else:
+        normalized['how'] = ""
+    
+    # 나머지 필드 매핑
+    normalized['who'] = raw_data.get('site_name', '')
+    
+    # what 필드 구성 (작업 내용 + 거래 유형)
+    what_parts = []
+    if raw_data.get('work_type'):
+        what_parts.append(raw_data['work_type'])
+    if raw_data.get('payment_type'):
+        what_parts.append(f"({raw_data['payment_type']})")
+    normalized['what'] = " ".join(what_parts) if what_parts else raw_data.get('memo', '')
+    
+    normalized['where'] = raw_data.get('site_name', '')
+    normalized['why'] = raw_data.get('payment_type', '')
     
     return normalized
 
@@ -257,15 +279,18 @@ if __name__ == "__main__":
         "내일",
         "모레",
         "다음주 수요일",
+        "다음주 월요일",
         "이번주 금요일",
-        "2025년 2월 15일",
-        "3월 10일",
-        "3/15",
+        "2025년 9월 15일",
+        "9월 10일",
+        "9/15",
         "10일 후",
         "수요일",
     ]
     
     print("=== 날짜 변환 테스트 ===")
+    print(f"오늘 날짜: {datetime.now().strftime('%Y-%m-%d %A')}")
+    print("-" * 40)
     for date_str in test_dates:
         result = parse_korean_date(date_str)
         print(f"{date_str:15} → {result}")
