@@ -231,9 +231,8 @@ with tab1:
                                     # 임시 파일 삭제
                                     os.unlink(tmp_path)
                                     
-                                    # 결과 저장
+                                    # 결과 저장 - 바로 입력창에 넣기
                                     st.session_state.recognized_text = transcript.text
-                                    st.session_state.voice_text_input = transcript.text
                                     
                                     # 인식 결과 표시
                                     st.success(f"✅ 인식 완료!")
@@ -523,41 +522,43 @@ with tab1:
         # 텍스트 입력
         st.markdown("### ✏️ 직접 입력하기")
         
-        # 인식된 텍스트가 있으면 자동 입력
-        default_text = ""
-        if 'recognized_text' in st.session_state and st.session_state.recognized_text:
-            default_text = st.session_state.recognized_text
-            st.success(f"🎤 인식된 내용이 아래에 자동 입력되었습니다!")
-            # 인식 후 세션에서 제거하여 중복 방지
-            del st.session_state.recognized_text
-        
-        # voice_text_input 세션 값 확인
-        if 'voice_text_input' in st.session_state and st.session_state.voice_text_input:
-            default_text = st.session_state.voice_text_input
-        
-        user_input = st.text_area(
-            "그냥 편하게 말씀하세요",
-            value=default_text,
-            placeholder="""예시:
+        # 음성 인식된 텍스트를 바로 입력창에 넣기
+        if 'recognized_text' in st.session_state:
+            user_input = st.text_area(
+                "그냥 편하게 말씀하세요",
+                value=st.session_state.recognized_text,  # 인식된 텍스트 바로 사용
+                placeholder="""예시:
 - 강남 아파트 타일공사 500만원 다음주 받기로 했어
 - 북구청 방수 작업 끝나면 1000만원 잔금""",
-            height=120,
-            key="main_text_input"  # key 변경
-        )
+                height=120,
+                key="user_text_input"
+            )
+            # 사용 후 삭제
+            del st.session_state.recognized_text
+        else:
+            user_input = st.text_area(
+                "그냥 편하게 말씀하세요",
+                value="",
+                placeholder="""예시:
+- 강남 아파트 타일공사 500만원 다음주 받기로 했어
+- 북구청 방수 작업 끝나면 1000만원 잔금""",
+                height=120,
+                key="user_text_input"
+            )
     
     with col2:
         # 빠른 입력 템플릿
         st.markdown("### 빠른 입력")
         if st.button("📝 계약금", use_container_width=True):
-            st.session_state.voice_text_input = "현장명 계약금 금액 오늘 받음"
+            st.session_state.recognized_text = "현장명 계약금 금액 오늘 받음"
             st.rerun()
         
         if st.button("💵 중도금", use_container_width=True):
-            st.session_state.voice_text_input = "현장명 중도금 금액 날짜 예정"
+            st.session_state.recognized_text = "현장명 중도금 금액 날짜 예정"
             st.rerun()
         
         if st.button("💰 잔금", use_container_width=True):
-            st.session_state.voice_text_input = "현장명 잔금 금액 완료시 받기"
+            st.session_state.recognized_text = "현장명 잔금 금액 완료시 받기"
             st.rerun()
     
     # 분석 버튼
