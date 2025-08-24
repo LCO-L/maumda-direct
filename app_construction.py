@@ -159,118 +159,186 @@ with tab1:
         if 'audio_data' not in st.session_state:
             st.session_state.audio_data = None
         
-        # 웹 브라우저 녹음 기능 (JavaScript)
-        audio_recorder_html = """
-        <script>
-        let mediaRecorder;
-        let audioChunks = [];
-        let isRecording = false;
-        
-        async function startRecording() {
-            try {
-                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                mediaRecorder = new MediaRecorder(stream);
-                audioChunks = [];
-                
-                mediaRecorder.ondataavailable = (event) => {
-                    audioChunks.push(event.data);
-                };
-                
-                mediaRecorder.onstop = async () => {
-                    const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
-                    const audioUrl = URL.createObjectURL(audioBlob);
-                    
-                    // Streamlit으로 데이터 전송
-                    const reader = new FileReader();
-                    reader.readAsDataURL(audioBlob);
-                    reader.onloadend = () => {
-                        const base64data = reader.result;
-                        window.parent.postMessage({
-                            type: 'audio_data',
-                            data: base64data
-                        }, '*');
-                    };
-                };
-                
-                mediaRecorder.start();
-                isRecording = true;
-                
-                // UI 업데이트
-                document.getElementById('startBtn').style.display = 'none';
-                document.getElementById('stopBtn').style.display = 'inline-block';
-                document.getElementById('status').innerHTML = '🔴 <b>녹음 중...</b> 편하게 말씀하세요';
-                document.getElementById('status').style.color = '#d32f2f';
-                
-            } catch (err) {
-                console.error('마이크 접근 오류:', err);
-                alert('마이크 접근 권한이 필요합니다.');
-            }
-        }
-        
-        function stopRecording() {
-            if (mediaRecorder && isRecording) {
-                mediaRecorder.stop();
-                mediaRecorder.stream.getTracks().forEach(track => track.stop());
-                isRecording = false;
-                
-                // UI 업데이트
-                document.getElementById('startBtn').style.display = 'inline-block';
-                document.getElementById('stopBtn').style.display = 'none';
-                document.getElementById('status').innerHTML = '✅ <b>녹음 완료!</b> AI 인식 버튼을 눌러주세요';
-                document.getElementById('status').style.color = '#388e3c';
-            }
-        }
-        </script>
-        
-        <div style="padding: 20px; background: #f5f5f5; border-radius: 10px;">
-            <div style="display: flex; gap: 10px; margin-bottom: 15px;">
-                <button id="startBtn" onclick="startRecording()" style="
-                    background: linear-gradient(135deg, #ff5252, #ff1744);
-                    color: white;
-                    border: none;
-                    padding: 12px 24px;
-                    font-size: 16px;
-                    font-weight: bold;
-                    border-radius: 25px;
-                    cursor: pointer;
-                    display: inline-block;
-                    min-width: 150px;
-                    transition: all 0.3s;
-                " onmouseover="this.style.transform='scale(1.05)'" onmouseout="this.style.transform='scale(1)'">
-                    🔴 녹음 시작
-                </button>
-                
-                <button id="stopBtn" onclick="stopRecording()" style="
-                    background: linear-gradient(135deg, #424242, #212121);
-                    color: white;
-                    border: none;
-                    padding: 12px 24px;
-                    font-size: 16px;
-                    font-weight: bold;
-                    border-radius: 25px;
-                    cursor: pointer;
-                    display: none;
-                    min-width: 150px;
-                    transition: all 0.3s;
-                " onmouseover="this.style.transform='scale(1.05)'" onmouseout="this.style.transform='scale(1)'">
-                    ⏹️ 녹음 중지
-                </button>
-            </div>
+        # 음성 녹음 시도
+        try:
+            from audio_recorder_streamlit import audio_recorder
             
-            <div id="status" style="
-                padding: 10px;
-                background: white;
-                border-radius: 5px;
-                color: #666;
-                font-size: 14px;
-            ">
-                📍 <b>준비됨</b> - 녹음 시작 버튼을 눌러주세요
-            </div>
-        </div>
-        """
+            # 녹음 버튼 분리
+            col_rec1, col_rec2, col_rec3 = st.columns([1, 1, 2])
+            
+            with col_rec1:
+                if not st.session_state.is_recording:
+                    if st.button("🔴 녹음 시작", use_container_width=True, key="start_rec", type="secondary"):
+                        st.session_state.is_recording = True
+                        st.rerun()
+            
+            with col_rec2:
+                if st.session_state.is_recording:
+                    if st.button("⏹️ 녹음 중지", use_container_width=True, key="stop_rec", type="secondary"):
+                        st.session_state.is_recording = False
+                        st.rerun()
+            
+            with col_rec3:
+                if st.session_state.is_recording:
+                    st.error("🔴 **녹음 중... 말씀해 주세요!**")
+                else:
+                    st.success("📍 준비됨")
+            
+            # 실제 녹음 컴포넌트 (숨김)
+            if st.session_state.is_recording:
+                with st.container():
+                    audio_bytes = audio_recorder(
+                        text="녹음 중...",
+                        recording_color="#FF0000",
+                        neutral_color="#4CAF50",
+                        icon_name="microphone",
+                        icon_size="2x",
+                        pause_threshold=30.0,  # 30초로 늘림
+                        key="hidden_recorder"
+                    )
+                    
+                    if audio_bytes:
+                        st.session_state.audio_data = audio_bytes
+                        st.session_state.is_recording = False
+                        st.rerun()
+            
+            # 녹음된 오디오 처리
+            if st.session_state.audio_data:
+                st.divider()
+                st.success("✅ 녹음 완료!")
+                st.audio(st.session_state.audio_data, format="audio/wav")
+                
+                col_ai1, col_ai2, col_ai3 = st.columns([1, 1, 1])
+                
+                with col_ai1:
+                    if st.button("🤖 **AI 인식**", type="primary", use_container_width=True, key="ai_recognize"):
+                        # 🔐 API 제한 체크
+                        if not check_api_limit("whisper_calls"):
+                            st.stop()
+                        
+                        with st.spinner("🎧 음성을 텍스트로 변환 중... (5~10초)"):
+                            try:
+                                from openai import OpenAI
+                                import tempfile
+                                import os
+                                
+                                # OpenAI 클라이언트
+                                api_key = st.secrets.get("OPENAI_API_KEY", os.getenv("OPENAI_API_KEY"))
+                                client = OpenAI(api_key=api_key)
+                                
+                                # 임시 파일 저장
+                                with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+                                    tmp.write(st.session_state.audio_data)
+                                    tmp_path = tmp.name
+                                
+                                # Progress bar 추가
+                                progress_bar = st.progress(0)
+                                progress_bar.progress(30, text="음성 파일 처리 중...")
+                                
+                                # Whisper API 호출
+                                with open(tmp_path, 'rb') as audio_file:
+                                    progress_bar.progress(60, text="AI 분석 중...")
+                                    transcript = client.audio.transcriptions.create(
+                                        model="whisper-1",
+                                        file=audio_file,
+                                        language="ko"
+                                    )
+                                
+                                progress_bar.progress(100, text="완료!")
+                                
+                                # 임시 파일 삭제
+                                os.unlink(tmp_path)
+                                
+                                # 결과 저장
+                                st.session_state.recognized_text = transcript.text
+                                st.session_state.voice_text_input = transcript.text
+                                
+                                # Progress bar 제거
+                                progress_bar.empty()
+                                
+                                # 인식 결과 표시
+                                st.success(f"✅ 인식 완료!")
+                                st.info(f"📝 **인식된 텍스트:** {transcript.text}")
+                                
+                                # 🔐 활동 로깅
+                                log_activity("voice_recognition", {"success": True, "text_length": len(transcript.text)})
+                                
+                                # 오디오 데이터 삭제
+                                st.session_state.audio_data = None
+                                
+                                # 페이지 새로고침으로 텍스트 반영
+                                time.sleep(2)  # 결과 확인 시간
+                                st.rerun()
+                                
+                            except Exception as e:
+                                st.error(f"❌ 인식 실패: {e}")
+                                log_activity("voice_recognition", {"success": False, "error": str(e)})
+                
+                with col_ai2:
+                    if st.button("🔄 다시 녹음", use_container_width=True, key="re_record"):
+                        st.session_state.audio_data = None
+                        st.session_state.is_recording = False
+                        st.rerun()
+                
+                with col_ai3:
+                    if st.button("🗑️ 취소", use_container_width=True, key="cancel_record"):
+                        st.session_state.audio_data = None
+                        st.session_state.is_recording = False
+                        if 'recognized_text' in st.session_state:
+                            del st.session_state.recognized_text
+                        st.rerun()
         
-        # HTML 컴포넌트 렌더링
-        components.html(audio_recorder_html, height=150)
+        except ImportError:
+            # 대체 음성 입력 방법 - 파일 업로드
+            st.warning("🎤 실시간 녹음 기능을 사용할 수 없습니다. 파일 업로드를 사용하세요.")
+            
+            audio_file = st.file_uploader(
+                "녹음된 음성 파일을 선택하세요",
+                type=['wav', 'mp3', 'm4a', 'webm', 'ogg'],
+                help="스마트폰이나 컴퓨터로 녹음한 파일을 업로드하세요"
+            )
+            
+            if audio_file:
+                st.audio(audio_file)
+                
+                col_up1, col_up2 = st.columns([1, 2])
+                with col_up1:
+                    if st.button("🤖 **AI 음성 인식**", type="primary", use_container_width=True):
+                        with st.spinner("🎧 음성 인식 중..."):
+                            try:
+                                from openai import OpenAI
+                                import tempfile
+                                
+                                api_key = st.secrets.get("OPENAI_API_KEY", os.getenv("OPENAI_API_KEY"))
+                                client = OpenAI(api_key=api_key)
+                                
+                                # 파일 저장
+                                with tempfile.NamedTemporaryFile(suffix=f".{audio_file.name.split('.')[-1]}", delete=False) as tmp:
+                                    tmp.write(audio_file.read())
+                                    tmp_path = tmp.name
+                                
+                                # Whisper API
+                                with open(tmp_path, 'rb') as f:
+                                    transcript = client.audio.transcriptions.create(
+                                        model="whisper-1",
+                                        file=f,
+                                        language="ko"
+                                    )
+                                
+                                os.unlink(tmp_path)
+                                
+                                st.session_state.recognized_text = transcript.text
+                                st.session_state.voice_text_input = transcript.text
+                                st.success(f"✅ 인식 완료!")
+                                st.info(f"📝 **인식된 텍스트:** {transcript.text}")
+                                time.sleep(2)
+                                st.rerun()
+                                
+                            except Exception as e:
+                                st.error(f"인식 실패: {e}")
+        
+        # time 모듈 import 추가 (필요한 경우)
+        import time
         
         # 대체 방법: audio_recorder_streamlit 패키지 사용
         try:
