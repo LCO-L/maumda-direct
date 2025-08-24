@@ -153,74 +153,177 @@ with tab1:
             - "서초 빌라 미장 이백만원 다음주 수요일"
             """)
         
-        # audio_bytes 초기화
-        audio_bytes = None
-        
-        # 세션 상태로 녹음 상태 관리
+        # 세션 상태 초기화
         if 'is_recording' not in st.session_state:
             st.session_state.is_recording = False
+        if 'audio_data' not in st.session_state:
+            st.session_state.audio_data = None
         
-        # 음성 녹음 시도
+        # 웹 브라우저 녹음 기능 (JavaScript)
+        audio_recorder_html = """
+        <script>
+        let mediaRecorder;
+        let audioChunks = [];
+        let isRecording = false;
+        
+        async function startRecording() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                mediaRecorder = new MediaRecorder(stream);
+                audioChunks = [];
+                
+                mediaRecorder.ondataavailable = (event) => {
+                    audioChunks.push(event.data);
+                };
+                
+                mediaRecorder.onstop = async () => {
+                    const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+                    const audioUrl = URL.createObjectURL(audioBlob);
+                    
+                    // Streamlit으로 데이터 전송
+                    const reader = new FileReader();
+                    reader.readAsDataURL(audioBlob);
+                    reader.onloadend = () => {
+                        const base64data = reader.result;
+                        window.parent.postMessage({
+                            type: 'audio_data',
+                            data: base64data
+                        }, '*');
+                    };
+                };
+                
+                mediaRecorder.start();
+                isRecording = true;
+                
+                // UI 업데이트
+                document.getElementById('startBtn').style.display = 'none';
+                document.getElementById('stopBtn').style.display = 'inline-block';
+                document.getElementById('status').innerHTML = '🔴 <b>녹음 중...</b> 편하게 말씀하세요';
+                document.getElementById('status').style.color = '#d32f2f';
+                
+            } catch (err) {
+                console.error('마이크 접근 오류:', err);
+                alert('마이크 접근 권한이 필요합니다.');
+            }
+        }
+        
+        function stopRecording() {
+            if (mediaRecorder && isRecording) {
+                mediaRecorder.stop();
+                mediaRecorder.stream.getTracks().forEach(track => track.stop());
+                isRecording = false;
+                
+                // UI 업데이트
+                document.getElementById('startBtn').style.display = 'inline-block';
+                document.getElementById('stopBtn').style.display = 'none';
+                document.getElementById('status').innerHTML = '✅ <b>녹음 완료!</b> AI 인식 버튼을 눌러주세요';
+                document.getElementById('status').style.color = '#388e3c';
+            }
+        }
+        </script>
+        
+        <div style="padding: 20px; background: #f5f5f5; border-radius: 10px;">
+            <div style="display: flex; gap: 10px; margin-bottom: 15px;">
+                <button id="startBtn" onclick="startRecording()" style="
+                    background: linear-gradient(135deg, #ff5252, #ff1744);
+                    color: white;
+                    border: none;
+                    padding: 12px 24px;
+                    font-size: 16px;
+                    font-weight: bold;
+                    border-radius: 25px;
+                    cursor: pointer;
+                    display: inline-block;
+                    min-width: 150px;
+                    transition: all 0.3s;
+                " onmouseover="this.style.transform='scale(1.05)'" onmouseout="this.style.transform='scale(1)'">
+                    🔴 녹음 시작
+                </button>
+                
+                <button id="stopBtn" onclick="stopRecording()" style="
+                    background: linear-gradient(135deg, #424242, #212121);
+                    color: white;
+                    border: none;
+                    padding: 12px 24px;
+                    font-size: 16px;
+                    font-weight: bold;
+                    border-radius: 25px;
+                    cursor: pointer;
+                    display: none;
+                    min-width: 150px;
+                    transition: all 0.3s;
+                " onmouseover="this.style.transform='scale(1.05)'" onmouseout="this.style.transform='scale(1)'">
+                    ⏹️ 녹음 중지
+                </button>
+            </div>
+            
+            <div id="status" style="
+                padding: 10px;
+                background: white;
+                border-radius: 5px;
+                color: #666;
+                font-size: 14px;
+            ">
+                📍 <b>준비됨</b> - 녹음 시작 버튼을 눌러주세요
+            </div>
+        </div>
+        """
+        
+        # HTML 컴포넌트 렌더링
+        components.html(audio_recorder_html, height=150)
+        
+        # 대체 방법: audio_recorder_streamlit 패키지 사용
         try:
             from audio_recorder_streamlit import audio_recorder
             
-            # 녹음 상태에 따른 UI 변경
-            if st.session_state.is_recording:
-                st.error("🔴 **녹음 중입니다... 말씀해 주세요!**")
-                recording_text = "⏹️ 녹음 중지"
-                recording_color = "#FF0000"
-                icon_name = "stop-circle"
-            else:
-                recording_text = "🔴 녹음 시작"
-                recording_color = "#4CAF50"
-                icon_name = "microphone"
+            st.markdown("#### 또는 간편 녹음")
             
-            # 녹음 버튼 (상태 표시 개선)
-            col_a, col_b = st.columns([2, 3])
+            # 녹음 버튼 분리
+            col_rec1, col_rec2, col_rec3 = st.columns([1, 1, 2])
             
-            with col_a:
-                audio_bytes = audio_recorder(
-                    text=recording_text,
-                    recording_color=recording_color,
-                    neutral_color="#4CAF50",
-                    icon_name=icon_name,
-                    icon_size="3x",
-                    pause_threshold=3.0,  # 3초 침묵시 자동 정지
-                    key="audio_recorder_main"
-                )
+            with col_rec1:
+                if not st.session_state.is_recording:
+                    if st.button("🔴 녹음 시작", use_container_width=True, key="start_rec"):
+                        st.session_state.is_recording = True
+                        st.rerun()
             
-            with col_b:
+            with col_rec2:
                 if st.session_state.is_recording:
-                    st.markdown("""
-                    <div style='padding: 10px; background-color: #ffebee; border-radius: 5px;'>
-                    <p style='margin: 0; color: #c62828;'>
-                    🎙️ <b>녹음 중...</b><br>
-                    편하게 말씀하세요
-                    </p>
-                    </div>
-                    """, unsafe_allow_html=True)
-                else:
-                    st.markdown("""
-                    <div style='padding: 10px; background-color: #e8f5e9; border-radius: 5px;'>
-                    <p style='margin: 0; color: #2e7d32;'>
-                    📍 <b>준비됨</b><br>
-                    녹음 버튼을 누르세요
-                    </p>
-                    </div>
-                    """, unsafe_allow_html=True)
+                    if st.button("⏹️ 녹음 중지", use_container_width=True, key="stop_rec"):
+                        st.session_state.is_recording = False
+                        st.rerun()
             
-            # 녹음 상태 토글
-            if audio_bytes and not st.session_state.is_recording:
-                st.session_state.is_recording = False
+            with col_rec3:
+                if st.session_state.is_recording:
+                    st.error("🔴 **녹음 중... 말씀해 주세요!**")
+                else:
+                    st.success("📍 준비됨")
+            
+            # 실제 녹음 컴포넌트 (숨김)
+            if st.session_state.is_recording:
+                audio_bytes = audio_recorder(
+                    text="",
+                    recording_color="#FF0000",
+                    neutral_color="#4CAF50",
+                    icon_name="microphone",
+                    icon_size="1x",
+                    pause_threshold=30.0,  # 30초로 늘림
+                    key="hidden_recorder"
+                )
                 
-            # 녹음된 오디오가 있을 때만 처리
-            if audio_bytes:
+                if audio_bytes:
+                    st.session_state.audio_data = audio_bytes
+                    st.session_state.is_recording = False
+                    st.rerun()
+            
+            # 녹음된 오디오 처리
+            if st.session_state.audio_data:
                 st.success("✅ 녹음 완료!")
-                st.audio(audio_bytes, format="audio/wav")
+                st.audio(st.session_state.audio_data, format="audio/wav")
                 
-                col_1, col_2, col_3 = st.columns([2, 2, 1])
+                col_ai1, col_ai2, col_ai3 = st.columns([2, 2, 1])
                 
-                with col_1:
+                with col_ai1:
                     if st.button("🤖 AI 인식", type="primary", use_container_width=True):
                         # 🔐 API 제한 체크
                         if not check_api_limit("whisper_calls"):
@@ -238,7 +341,7 @@ with tab1:
                                 
                                 # 임시 파일 저장
                                 with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
-                                    tmp.write(audio_bytes)
+                                    tmp.write(st.session_state.audio_data)
                                     tmp_path = tmp.name
                                 
                                 # Progress bar 추가
@@ -261,10 +364,8 @@ with tab1:
                                 
                                 # 결과 저장
                                 st.session_state.recognized_text = transcript.text
-                                st.success(f"✅ 인식 완료: \"{transcript.text}\"")
-                                
-                                # 자동으로 텍스트 입력창에 추가
                                 st.session_state.voice_text_input = transcript.text
+                                st.success(f"✅ 인식 완료: \"{transcript.text}\"")
                                 
                                 # Progress bar 제거
                                 progress_bar.empty()
@@ -279,17 +380,17 @@ with tab1:
                                 st.error(f"❌ 인식 실패: {e}")
                                 log_activity("voice_recognition", {"success": False, "error": str(e)})
                 
-                with col_2:
+                with col_ai2:
                     if st.button("🔄 다시 녹음", use_container_width=True):
+                        st.session_state.audio_data = None
                         st.session_state.is_recording = False
                         st.rerun()
         
         except ImportError:
             # 대체 음성 입력 방법
-            st.warning("🎤 실시간 녹음 기능을 사용할 수 없습니다.")
-            
-            # 파일 업로드 방식
+            st.divider()
             st.markdown("#### 📁 음성 파일 업로드")
+            
             audio_file = st.file_uploader(
                 "녹음된 음성 파일을 선택하세요",
                 type=['wav', 'mp3', 'm4a', 'webm'],
