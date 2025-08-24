@@ -4,5 +4,6 @@ plotly
 pillow
 requests
 openai
-audio-recorder-streamlit
+st-audiorec
+streamlit-webrtc
 python-dotenv
