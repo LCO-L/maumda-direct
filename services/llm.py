@@ -62,7 +62,7 @@ def analyze_text(text):
         response = deepseek_client.chat.completions.create(
             model="deepseek-chat",
             messages=[
-                {"role": "system", "content": "당신은 한국 건설현장 전문 데이터 분석가입니다. 반드시 JSON 형식으로만 응답하세요."},
+                {"role": "system", "content": "반드시 JSON 형식으로만 응답하세요."},
                 {"role": "user", "content": prompt.format(text=text)}
             ],
             temperature=0.3,
@@ -90,18 +90,6 @@ def post_process_construction(result, original_text):
             if match:
                 result['who'] = match.group(1)
     
-    # what 필드 보정: 금액 + 공사내용 조합
-    if not result.get('what'):
-        import re
-        # 금액 찾기
-        amount_match = re.search(r'(\d+)\s*만\s*원?', original_text)
-        # 공사 종류 찾기
-        work_match = re.search(r'(타일|방수|미장|조적|인테리어|도배|도장|철거|설비|전기)(?:공사)?', original_text)
-        
-        if amount_match and work_match:
-            result['what'] = f"{work_match.group(0)} {amount_match.group(0)}"
-        elif amount_match:
-            result['what'] = amount_match.group(0)
     
     # how 필드 보정: 계약금/중도금/잔금 자동 감지
     if not result.get('how'):
