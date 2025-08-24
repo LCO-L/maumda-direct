@@ -11,20 +11,24 @@ try:
 except ImportError:
     pass  # Streamlit Cloud에서는 secrets 사용
 
-# Streamlit secrets 또는 환경변수 사용
+# DeepSeek API 설정
 try:
     import streamlit as st
-    api_key = st.secrets.get("OPENAI_API_KEY", os.getenv("OPENAI_API_KEY"))
+    DEEPSEEK_API_KEY = st.secrets.get("DEEPSEEK_API_KEY", os.getenv("DEEPSEEK_API_KEY"))
 except:
-    api_key = os.getenv("OPENAI_API_KEY")
+    DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 
-client = OpenAI(api_key=api_key)
+# DeepSeek 클라이언트 설정
+deepseek_client = OpenAI(
+    api_key=DEEPSEEK_API_KEY,
+    base_url="https://api.deepseek.com/v1"
+)
 
 def analyze_text(text):
     """건설현장 맞춤형 자연어 분석"""
     
     prompt = """
-    당신은 한국 건설현장 전문 어시스턴트입니다.
+    당신은 건설 현장을 데이터베이스에 옮기는 마법사입니다.
     사장님들이 일상적으로 사용하는 말을 분석해서 구조화합니다.
     
     다음 텍스트를 5W1H 형식으로 분석하되, 건설업 맥락에 맞게 해석하세요:
@@ -54,8 +58,8 @@ def analyze_text(text):
     """
     
     try:
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
+        response = deepseek_client.chat.completions.create(
+            model="deepseek-chat",
             messages=[
                 {"role": "system", "content": "당신은 한국 건설현장 전문 데이터 분석가입니다. 반드시 JSON 형식으로만 응답하세요."},
                 {"role": "user", "content": prompt.format(text=text)}
@@ -65,15 +69,11 @@ def analyze_text(text):
         )
         
         result = json.loads(response.choices[0].message.content or "{}")
-        
-        # 건설현장 특화 후처리
         result = post_process_construction(result, text)
-        
         return result
         
     except Exception as e:
-        print(f"LLM 분석 오류: {e}")
-        # 폴백: 간단한 규칙 기반 파싱
+        print(f"DeepSeek 분석 오류: {e}")
         return fallback_parse(text)
 
 def post_process_construction(result, original_text):
@@ -190,3 +190,4 @@ if __name__ == "__main__":
         for key, value in result.items():
             if value:
                 print(f"  {key}: {value}")
+
