@@ -41,19 +41,8 @@ def analyze_text(text):
     ❓ 어떻게:
     💡 왜:
     
-    입력 예시:
-    - "강남 아파트 타일공사 500만원 다음주 받기로 했어"
-    - "북구청 방수 작업 끝나면 1000만원 잔금"
-    - "김사장한테 인테리어 대금 300만원 15일에 받아야 돼"
     
     분석할 텍스트: {text}
-    
-    주의사항:
-    1. 건설 현장 용어를 정확히 이해하세요 (미장, 방수, 조적, 타일, 인테리어)
-    2. 금액은 "만원" 단위로 자주 표현됩니다
-    3. 발주처와 현장명이 혼용되어 사용됩니다
-    4. 계약금/중도금/잔금은 how 필드에 넣으세요
-    5. 정보가 없는 필드는 빈 문자열("")로 남겨두세요
     
     반드시 유효한 JSON 형식으로만 응답하세요.
     """
@@ -65,7 +54,7 @@ def analyze_text(text):
                 {"role": "system", "content": "반드시 JSON 형식으로만 응답하세요."},
                 {"role": "user", "content": prompt.format(text=text)}
             ],
-            temperature=0.3,
+            temperature=0.4,
             response_format={"type": "json_object"}
         )
         
@@ -79,26 +68,6 @@ def analyze_text(text):
 
 def post_process_construction(result, original_text):
     """건설현장 데이터 후처리"""
-    
-    # who 필드 보정: 현장명이 비어있으면 where나 why에서 가져오기
-    if not result.get('who'):
-        if result.get('where'):
-            result['who'] = result['where']
-        elif '아파트' in original_text or '현장' in original_text:
-            import re
-            match = re.search(r'(\S+(?:아파트|현장|빌딩|오피스텔|주택|빌라))', original_text)
-            if match:
-                result['who'] = match.group(1)
-    
-    
-    # how 필드 보정: 계약금/중도금/잔금 자동 감지
-    if not result.get('how'):
-        if '계약금' in original_text:
-            result['how'] = '계약금'
-        elif '중도금' in original_text:
-            result['how'] = '중도금'
-        elif '잔금' in original_text or '마지막' in original_text or '끝나면' in original_text:
-            result['how'] = '잔금'
             
     return result
 
