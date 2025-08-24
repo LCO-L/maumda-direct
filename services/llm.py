@@ -1,4 +1,4 @@
-# llm.py - 건설현장 특화 버전 (완성 버전)
+# llm.py - 건설현장 실무 특화 버전
 import os
 import json
 import re
@@ -10,7 +10,7 @@ try:
     from dotenv import load_dotenv
     load_dotenv()
 except ImportError:
-    pass  # Streamlit Cloud에서는 secrets 사용
+    pass
 
 # DeepSeek API 설정
 try:
@@ -20,274 +20,358 @@ except:
     DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 
 # DeepSeek 클라이언트 설정
-deepseek_client = OpenAI(
-    api_key=DEEPSEEK_API_KEY,
-    base_url="https://api.deepseek.com/v1"
-)
+if DEEPSEEK_API_KEY:
+    deepseek_client = OpenAI(
+        api_key=DEEPSEEK_API_KEY,
+        base_url="https://api.deepseek.com/v1"
+    )
+else:
+    deepseek_client = None
 
 def analyze_text(text):
-    """건설현장 맞춤형 자연어 분석"""
+    """건설현장 실무 중심 텍스트 분석"""
     
     prompt = f"""
-    당신은 건설 현장 관리 전문 AI입니다. 사용자의 말을 분석해서 다음과 같은 JSON 형식으로 변환해주세요:
-
-    {{
-        "site": "현장 이름 (예: 서울 XX아파트)",
-        "amount": 금액 (숫자만),
-        "type": "거래 유형 (중도금, 잔금, 계약금, 자재비, 인건비, 기타)",
-        "due_date": "YYYY-MM-DD 형식",
-        "contractor": "발주처/업체명",
-        "category": "분류 (미장, 방수, 조적, 타일, 인테리어, 기타)",
-        "payment_method": "결제 방식 (현금, 계좌이체, 외상, 카드)"
-    }}
-
-    **분석 규칙:**
-    1. 금액은 항상 숫자만 포함 (예: 5000000)
-    2. 날짜는 반드시 YYYY-MM-DD 형식으로 변환
-    3. "다음 주 수요일" → 실제 날짜로 계산
-    4. "OO아파트" → "서울 OO아파트"로 보완
-    5. 분류는 건설업 종사자가 사용하는 용어로
+    건설현장 수금 관리 시스템입니다.
+    아래 텍스트를 분석해서 JSON 형식으로 변환하세요.
 
     분석할 텍스트: "{text}"
 
-    반드시 유효한 JSON 형식으로만 응답하세요.
+    반환 형식:
+    {{
+        "site_name": "현장명 또는 거래처명",
+        "work_type": "작업 종류",
+        "amount": "금액 (숫자만)",
+        "payment_type": "계약금|중도금|잔금|자재비|인건비|기타",
+        "expected_date": "받을 날짜",
+        "payment_method": "현금|계좌이체|카드|미정",
+        "memo": "추가 메모사항"
+    }}
+
+    **분석 규칙:**
+    1. site_name: "북구청", "강남 아파트", "김사장" 등 거래처/현장명
+    2. work_type: "방수", "타일", "미장", "조적", "인테리어" 등
+    3. amount: 숫자만 (예: "1000만원" → "10000000")
+    4. payment_type: 텍스트에서 "잔금", "중도금" 등 찾기
+    5. expected_date: "YYYY-MM-DD" 형식으로 변환
+    6. 정보가 없으면 빈 문자열 ""
+    
+    반드시 유효한 JSON만 반환하세요.
     """
     
-    try:
-        response = deepseek_client.chat.completions.create(
-            model="deepseek-chat",
-            messages=[
-                {"role": "system", "content": "당신은 건설 현장 관리 전문 AI입니다. 사용자의 말을 분석해서 구조화된 데이터로 변환해주세요."},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.1,
-            response_format={"type": "json_object"}
-        )
-        
-        result = json.loads(response.choices[0].message.content or "{}")
-        result = post_process_construction(result, text)
-        return result
-        
-    except Exception as e:
-        print(f"DeepSeek 분석 오류: {e}")
-        return fallback_parse(text)
-
-def post_process_construction(result, original_text):
-    """건설현장 데이터 후처리"""
-    # 금액 정규화 (문자열 → 숫자)
-    if 'amount' in result and isinstance(result['amount'], str):
-        # '500만원' → 5000000으로 변환
-        amount_str = result['amount']
-        if '만원' in amount_str:
-            result['amount'] = int(amount_str.replace('만원', '').replace(',', '')) * 10000
-        elif '원' in amount_str:
-            result['amount'] = int(amount_str.replace('원', '').replace(',', ''))
-    
-    # 날짜 정규화 (상대적 표현 → 절대적 날짜)
-    if 'due_date' in result and isinstance(result['due_date'], str):
-        due_date = result['due_date']
-        today = datetime.now()
-        
-        # 상대적 날짜 변환
-        if '내일' in due_date:
-            result['due_date'] = (today + timedelta(days=1)).strftime('%Y-%m-%d')
-        elif '모레' in due_date:
-            result['due_date'] = (today + timedelta(days=2)).strftime('%Y-%m-%d')
-        elif '다음 주' in due_date or '다음주' in due_date:
-            # 다음 주 월요일 찾기
-            days_until_monday = (7 - today.weekday()) % 7
-            if days_until_monday == 0:  # 이미 월요일인 경우
-                days_until_monday = 7
-            next_monday = today + timedelta(days=days_until_monday)
+    if deepseek_client:
+        try:
+            response = deepseek_client.chat.completions.create(
+                model="deepseek-chat",
+                messages=[
+                    {"role": "system", "content": "건설현장 수금 관리 데이터 분석 AI"},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.1,
+                response_format={"type": "json_object"}
+            )
             
-            # 요일 매칭
-            if '월요일' in due_date:
-                result['due_date'] = next_monday.strftime('%Y-%m-%d')
-            elif '화요일' in due_date:
-                result['due_date'] = (next_monday + timedelta(days=1)).strftime('%Y-%m-%d')
-            elif '수요일' in due_date:
-                result['due_date'] = (next_monday + timedelta(days=2)).strftime('%Y-%m-%d')
-            elif '목요일' in due_date:
-                result['due_date'] = (next_monday + timedelta(days=3)).strftime('%Y-%m-%d')
-            elif '금요일' in due_date:
-                result['due_date'] = (next_monday + timedelta(days=4)).strftime('%Y-%m-%d')
-    
-    # 현장명 보완
-    if 'site' in result and '아파트' in result['site'] and '서울' not in result['site']:
-        result['site'] = f"서울 {result['site']}"
-    
-    # 거래 유형 자동 분류
-    if 'type' not in result:
-        if any(keyword in original_text for keyword in ['중도금', '중도 금']):
-            result['type'] = '중도금'
-        elif any(keyword in original_text for keyword in ['잔금', '잔 금']):
-            result['type'] = '잔금'
-        elif any(keyword in original_text for keyword in ['계약금', '계약 금']):
-            result['type'] = '계약금'
-        elif any(keyword in original_text for keyword in ['자재비', '자재 값']):
-            result['type'] = '자재비'
-        elif any(keyword in original_text for keyword in ['인건비', '일당', '노무비']):
-            result['type'] = '인건비'
-        else:
-            result['type'] = '기타'
-    
-    # 카테고리 자동 분류
-    if 'category' not in result:
-        if any(keyword in original_text for keyword in ['미장', '미장공']):
-            result['category'] = '미장'
-        elif any(keyword in original_text for keyword in ['방수', '방수공']):
-            result['category'] = '방수'
-        elif any(keyword in original_text for keyword in ['조적', '조적공']):
-            result['category'] = '조적'
-        elif any(keyword in original_text for keyword in ['타일', '타일공']):
-            result['category'] = '타일'
-        elif any(keyword in original_text for keyword in ['인테리어', '인테리어공']):
-            result['category'] = '인테리어'
-        else:
-            result['category'] = '기타'
-    
-    # 결제 방식 자동 분류
-    if 'payment_method' not in result:
-        if any(keyword in original_text for keyword in ['현금', '현금으로']):
-            result['payment_method'] = '현금'
-        elif any(keyword in original_text for keyword in ['계좌', '이체', '송금']):
-            result['payment_method'] = '계좌이체'
-        elif any(keyword in original_text for keyword in ['카드', '체크카드', '신용카드']):
-            result['payment_method'] = '카드'
-        elif any(keyword in original_text for keyword in ['외상', '빚']):
-            result['payment_method'] = '외상'
-        else:
-            result['payment_method'] = '미정'
-    
-    return result
+            result = json.loads(response.choices[0].message.content or "{}")
+            print(f"AI 분석 결과: {result}")
+            return post_process(result, text)
+            
+        except Exception as e:
+            print(f"AI 분석 오류: {e}")
+            return rule_based_parse(text)
+    else:
+        return rule_based_parse(text)
 
-def fallback_parse(text):
-    """LLM 실패시 규칙 기반 파싱"""
+def rule_based_parse(text):
+    """규칙 기반 파싱 (AI 없이도 작동)"""
     result = {
-        'site': '',
-        'amount': 0,
-        'type': '기타',
-        'due_date': '',
-        'contractor': '',
-        'category': '기타',
-        'payment_method': '미정'
+        'site_name': '',
+        'work_type': '',
+        'amount': '',
+        'payment_type': '',
+        'expected_date': '',
+        'payment_method': '',
+        'memo': ''
     }
     
-    # 현장명/업체명 추출
+    # 1. 현장명/거래처 추출
     site_patterns = [
-        r'(\S+(?:아파트|현장|빌딩|오피스텔|주택|빌라))',
-        r'(\S+(?:구청|시청|동사무소))',
-        r'(\S+건설)',
-        r'(\S+인테리어)',
+        (r'(\S+구청)', 1),
+        (r'(\S+시청)', 1),
+        (r'(\S+청사)', 1),
+        (r'(\S+\s?아파트)', 1),
+        (r'(\S+\s?현장)', 1),
+        (r'(\S+\s?빌딩)', 1),
+        (r'(\S+\s?오피스텔)', 1),
+        (r'(\S+\s?빌라)', 1),
+        (r'(\S+\s?주택)', 1),
+        (r'(\S+건설)', 1),
+        (r'(\S+건축)', 1),
+        (r'(\S+시공)', 1),
+        (r'(\S+인테리어)', 1),
+        (r'(\S+사장)', 1),
     ]
     
-    for pattern in site_patterns:
+    for pattern, group in site_patterns:
         match = re.search(pattern, text)
         if match:
-            result['site'] = match.group(1)
-            # 서울 접두사 추가
-            if '아파트' in result['site'] and '서울' not in result['site']:
-                result['site'] = f"서울 {result['site']}"
+            result['site_name'] = match.group(group).strip()
             break
     
-    # 발주처/업체명 추출
-    contractor_patterns = [
-        r'(\S+(?:건설|인테리어|시공사))',
-        r'(\S+사장님)',
-        r'(\S+씨)',
-    ]
+    # 2. 작업 종류 추출
+    work_keywords = {
+        '방수': '방수공사',
+        '미장': '미장공사',
+        '조적': '조적공사',
+        '타일': '타일공사',
+        '인테리어': '인테리어',
+        '도색': '도색작업',
+        '페인트': '페인트작업',
+        '전기': '전기공사',
+        '설비': '설비공사',
+        '철근': '철근작업',
+        '도배': '도배작업',
+        '장판': '장판작업',
+        '샷시': '샷시공사',
+        '유리': '유리공사',
+        '목공': '목공작업',
+        '철거': '철거작업',
+        '청소': '청소작업'
+    }
     
-    for pattern in contractor_patterns:
-        match = re.search(pattern, text)
-        if match:
-            result['contractor'] = match.group(1)
+    for keyword, work_name in work_keywords.items():
+        if keyword in text:
+            result['work_type'] = work_name
             break
     
-    # 금액 추출 (만원 단위)
+    # 작업이 안 나오면 text에서 "작업" 앞 단어 추출
+    if not result['work_type']:
+        work_match = re.search(r'(\S+)\s*작업', text)
+        if work_match:
+            result['work_type'] = f"{work_match.group(1)}작업"
+    
+    # 3. 금액 추출 (숫자로 변환)
     amount_patterns = [
-        r'(\d+)\s*만\s*원',
-        r'(\d+)\s*만원',
-        r'약\s*(\d+)\s*만',
+        (r'(\d+)\s*억\s*(\d+)?\s*만?\s*원?', lambda m: 
+            int(m.group(1)) * 100000000 + (int(m.group(2)) * 10000 if m.group(2) else 0)),
+        (r'(\d+)\s*천\s*만\s*원?', lambda m: int(m.group(1)) * 10000000),
+        (r'(\d+)\s*백\s*만\s*원?', lambda m: int(m.group(1)) * 1000000),
+        (r'(\d+)\s*만\s*원', lambda m: int(m.group(1)) * 10000),
+        (r'(\d+)\s*만원', lambda m: int(m.group(1)) * 10000),
+        (r'(\d+)만', lambda m: int(m.group(1)) * 10000),
+        (r'(\d{7,})\s*원', lambda m: int(m.group(1))),  # 7자리 이상 숫자
+        (r'(\d+,\d+)\s*원', lambda m: int(m.group(1).replace(',', ''))),
     ]
     
-    for pattern in amount_patterns:
+    for pattern, converter in amount_patterns:
         match = re.search(pattern, text)
         if match:
-            result['amount'] = int(match.group(1)) * 10000
+            result['amount'] = str(converter(match))
             break
     
-    # 날짜 추출 및 변환
+    # 4. 거래 유형 추출
+    payment_types = {
+        '계약금': '계약금',
+        '착수금': '계약금',
+        '선금': '계약금',
+        '중도금': '중도금',
+        '중도 금': '중도금',
+        '잔금': '잔금',
+        '잔 금': '잔금',
+        '완료금': '잔금',
+        '준공금': '잔금',
+        '자재비': '자재비',
+        '자재 비': '자재비',
+        '자재값': '자재비',
+        '자재 값': '자재비',
+        '인건비': '인건비',
+        '인건 비': '인건비',
+        '노무비': '인건비',
+        '일당': '인건비',
+        '품값': '인건비',
+        '품삯': '인건비'
+    }
+    
+    for keyword, ptype in payment_types.items():
+        if keyword in text:
+            result['payment_type'] = ptype
+            break
+    
+    if not result['payment_type']:
+        result['payment_type'] = '기타'
+    
+    # 5. 예상 날짜 추출
     today = datetime.now()
-    date_patterns = [
-        (r'내일', (today + timedelta(days=1)).strftime('%Y-%m-%d')),
-        (r'모레', (today + timedelta(days=2)).strftime('%Y-%m-%d')),
-        (r'다음\s*주\s*월요일', (today + timedelta(days=(7 - today.weekday()))).strftime('%Y-%m-%d')),
-        (r'다음\s*주\s*화요일', (today + timedelta(days=(8 - today.weekday()))).strftime('%Y-%m-%d')),
-        (r'다음\s*주\s*수요일', (today + timedelta(days=(9 - today.weekday()))).strftime('%Y-%m-%d')),
-        (r'다음\s*주\s*목요일', (today + timedelta(days=(10 - today.weekday()))).strftime('%Y-%m-%d')),
-        (r'다음\s*주\s*금요일', (today + timedelta(days=(11 - today.weekday()))).strftime('%Y-%m-%d')),
-        (r'(\d+)\s*일', lambda m: (today + timedelta(days=int(m.group(1)))).strftime('%Y-%m-%d')),
-    ]
     
-    for pattern, replacement in date_patterns:
-        match = re.search(pattern, text)
-        if match:
-            if callable(replacement):
-                result['due_date'] = replacement(match)
-            else:
-                result['due_date'] = replacement
+    # 조건부 날짜 (작업 완료 후 등)
+    if any(word in text for word in ['끝나면', '완료되면', '완료후', '완료 후', '끝나고']):
+        result['expected_date'] = '작업 완료 후'
+    else:
+        date_patterns = [
+            (r'오늘', today.strftime('%Y-%m-%d')),
+            (r'내일', (today + timedelta(days=1)).strftime('%Y-%m-%d')),
+            (r'모레', (today + timedelta(days=2)).strftime('%Y-%m-%d')),
+            (r'글피', (today + timedelta(days=3)).strftime('%Y-%m-%d')),
+            (r'이번\s*주', f"이번주 ({today.strftime('%Y-%m-%d')} 주)"),
+            (r'다음\s*주', (today + timedelta(days=7)).strftime('%Y-%m-%d')),
+            (r'(\d+)일\s*후', lambda m: (today + timedelta(days=int(m.group(1)))).strftime('%Y-%m-%d')),
+            (r'(\d+)일\s*뒤', lambda m: (today + timedelta(days=int(m.group(1)))).strftime('%Y-%m-%d')),
+        ]
+        
+        for pattern, replacement in date_patterns:
+            match = re.search(pattern, text)
+            if match:
+                if callable(replacement):
+                    result['expected_date'] = replacement(match)
+                else:
+                    result['expected_date'] = replacement
+                break
+        
+        # 구체적 날짜 패턴
+        if not result['expected_date']:
+            # 월/일 형식
+            date_match = re.search(r'(\d{1,2})[월/]\s*(\d{1,2})', text)
+            if date_match:
+                month = int(date_match.group(1))
+                day = int(date_match.group(2))
+                year = today.year
+                try:
+                    target_date = datetime(year, month, day)
+                    if target_date < today:
+                        year += 1
+                    result['expected_date'] = f"{year}-{month:02d}-{day:02d}"
+                except:
+                    pass
+    
+    # 6. 결제 방식 추출
+    payment_methods = {
+        '현금': '현금',
+        '캐시': '현금',
+        '계좌': '계좌이체',
+        '이체': '계좌이체',
+        '송금': '계좌이체',
+        '입금': '계좌이체',
+        '카드': '카드',
+        '체크카드': '카드',
+        '신용카드': '카드',
+        '외상': '외상',
+        '후불': '외상'
+    }
+    
+    for keyword, method in payment_methods.items():
+        if keyword in text:
+            result['payment_method'] = method
             break
     
-    # 거래 유형 추출
-    if any(keyword in text for keyword in ['중도금', '중도 금']):
-        result['type'] = '중도금'
-    elif any(keyword in text for keyword in ['잔금', '잔 금']):
-        result['type'] = '잔금'
-    elif any(keyword in text for keyword in ['계약금', '계약 금']):
-        result['type'] = '계약금'
-    elif any(keyword in text for keyword in ['자재비', '자재 값']):
-        result['type'] = '자재비'
-    elif any(keyword in text for keyword in ['인건비', '일당', '노무비']):
-        result['type'] = '인건비'
+    if not result['payment_method']:
+        result['payment_method'] = '미정'
     
-    # 카테고리 추출
-    if any(keyword in text for keyword in ['미장', '미장공']):
-        result['category'] = '미장'
-    elif any(keyword in text for keyword in ['방수', '방수공']):
-        result['category'] = '방수'
-    elif any(keyword in text for keyword in ['조적', '조적공']):
-        result['category'] = '조적'
-    elif any(keyword in text for keyword in ['타일', '타일공']):
-        result['category'] = '타일'
-    elif any(keyword in text for keyword in ['인테리어', '인테리어공']):
-        result['category'] = '인테리어'
-    
-    # 결제 방식 추출
-    if any(keyword in text for keyword in ['현금', '현금으로']):
-        result['payment_method'] = '현금'
-    elif any(keyword in text for keyword in ['계좌', '이체', '송금']):
-        result['payment_method'] = '계좌이체'
-    elif any(keyword in text for keyword in ['카드', '체크카드', '신용카드']):
-        result['payment_method'] = '카드'
-    elif any(keyword in text for keyword in ['외상', '빚']):
-        result['payment_method'] = '외상'
+    # 7. 전체 텍스트를 메모로
+    result['memo'] = text
     
     return result
+
+def post_process(result, original_text):
+    """AI 결과 후처리 및 보정"""
+    # amount가 문자열인 경우 숫자로 변환
+    if 'amount' in result and result['amount']:
+        amount_str = str(result['amount'])
+        # 이미 숫자만 있으면 그대로
+        if amount_str.isdigit():
+            pass
+        # "500만원" 형태면 변환
+        elif '만원' in amount_str or '만' in amount_str:
+            match = re.search(r'(\d+)', amount_str)
+            if match:
+                result['amount'] = str(int(match.group(1)) * 10000)
+    
+    # 날짜 형식 검증
+    if 'expected_date' in result and result['expected_date']:
+        if not re.match(r'\d{4}-\d{2}-\d{2}', result['expected_date']):
+            # 상대적 날짜 표현 처리
+            from services.utils import parse_korean_date
+            parsed_date = parse_korean_date(result['expected_date'])
+            if parsed_date:
+                result['expected_date'] = parsed_date
+    
+    # 빈 필드 처리
+    for key in ['site_name', 'work_type', 'amount', 'payment_type', 'expected_date', 'payment_method', 'memo']:
+        if key not in result:
+            result[key] = ''
+    
+    # 메모가 없으면 원본 텍스트 저장
+    if not result.get('memo'):
+        result['memo'] = original_text
+    
+    return result
+
+def normalize_data(raw_data):
+    """
+    LLM 분석 결과를 Notion 저장용 형식으로 변환
+    건설현장 필드 → 5W1H 매핑
+    """
+    # 금액 포맷팅
+    amount_str = ""
+    if raw_data.get('amount'):
+        try:
+            amount_num = int(raw_data['amount'])
+            amount_str = f"{amount_num:,}원"
+        except:
+            amount_str = raw_data.get('amount', '')
+    
+    # 작업 내용 조합 (금액 제외)
+    what_parts = []
+    if raw_data.get('work_type'):
+        what_parts.append(raw_data['work_type'])
+    if raw_data.get('payment_type'):
+        what_parts.append(f"({raw_data['payment_type']})")
+    
+    what_text = " ".join(what_parts) if what_parts else raw_data.get('memo', '')
+    
+    # 5W1H 형식으로 변환
+    normalized = {
+        'who': raw_data.get('site_name', ''),          # 현장명
+        'what': what_text,                              # 작업내용
+        'when': raw_data.get('expected_date', ''),      # 날짜
+        'where': raw_data.get('site_name', ''),         # 위치
+        'why': raw_data.get('payment_type', ''),        # 거래유형
+        'how': amount_str,                              # 💰 금액 (변경됨!)
+        
+        # 추가 필드 (UI 표시용)
+        'original_amount': raw_data.get('amount', ''),
+        'work_type': raw_data.get('work_type', ''),
+        'payment_method': raw_data.get('payment_method', ''),
+        'memo': raw_data.get('memo', '')
+    }
+    
+    return normalized
 
 # 테스트
 if __name__ == "__main__":
     test_cases = [
-        "강남 아파트 타일공사 중도금 500만원 다음주 수요일에 받기로 했어",
-        "북구청 방수 작업 끝나면 1000만원 잔금 현금으로 받을 거야",
-        "김사장한테 인테리어 대금 300만원 15일에 계좌이체로 받아야 돼",
-        "서초 빌라 미장 계약금 200만원 오늘 현금으로 받았어",
-        "판교 오피스텔 조적공사 450만원 다음주 금요일에 외상으로 받기로 함"
+        "북구청 방수 작업 끝나면 1000만원 잔금",
+        "강남 아파트 타일공사 중도금 500만원 다음주 수요일",
+        "김사장 인테리어 계약금 300만원 내일 현금",
+        "서초 빌라 미장 200만원 15일 계좌이체",
+        "판교 오피스텔 조적공사 450만원 완료후 받기",
+        "상가 전기공사 150만원 월말",
+        "이번달 말까지 도배 인건비 80만원"
     ]
     
+    print("=" * 60)
     for text in test_cases:
-        print(f"\n입력: {text}")
+        print(f"\n📝 입력: {text}")
         result = analyze_text(text)
-        print(f"분석 결과:")
+        print(f"🔍 분석 결과:")
         for key, value in result.items():
             if value:
-                print(f"  {key}: {value}")
+                print(f"   {key}: {value}")
+        
+        print(f"\n📦 Notion 저장 형식:")
+        normalized = normalize_data(result)
+        print(f"   🏗️ 현장(who): {normalized['who']}")
+        print(f"   📋 내용(what): {normalized['what']}")
+        print(f"   📅 언제(when): {normalized['when']}")
+        print(f"   📍 위치(where): {normalized['where']}")
+        print(f"   ❓ 유형(why): {normalized['why']}")
+        print(f"   💰 금액(how): {normalized['how']}")
+        print("-" * 40)
