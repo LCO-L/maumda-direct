@@ -211,30 +211,39 @@ def rule_based_parse(text):
             # 현재 요일 확인 (0=월요일, 6=일요일)
             current_weekday = today.weekday()
             
-            # 다음주 월요일까지 남은 일수 계산
-            days_until_next_monday = (7 - current_weekday) % 7
-            if days_until_next_monday == 0:  # 오늘이 월요일이면
-                days_until_next_monday = 7
+            # 다음주 시작(월요일)까지 일수 계산
+            # 월요일(0)인 경우: 7일 후
+            # 화요일(1)인 경우: 6일 후
+            # ...
+            # 일요일(6)인 경우: 1일 후
+            if current_weekday == 6:  # 일요일
+                days_to_next_monday = 1
+            else:
+                days_to_next_monday = 7 - current_weekday
             
-            next_monday = today + timedelta(days=days_until_next_monday)
+            next_monday = today + timedelta(days=days_to_next_monday)
             
             # 요일별 처리
-            if '월요일' in text:
-                result['expected_date'] = next_monday.strftime('%Y-%m-%d')
-            elif '화요일' in text:
-                result['expected_date'] = (next_monday + timedelta(days=1)).strftime('%Y-%m-%d')
-            elif '수요일' in text:
-                result['expected_date'] = (next_monday + timedelta(days=2)).strftime('%Y-%m-%d')
-            elif '목요일' in text:
-                result['expected_date'] = (next_monday + timedelta(days=3)).strftime('%Y-%m-%d')
-            elif '금요일' in text:
-                result['expected_date'] = (next_monday + timedelta(days=4)).strftime('%Y-%m-%d')
-            elif '토요일' in text:
-                result['expected_date'] = (next_monday + timedelta(days=5)).strftime('%Y-%m-%d')
-            elif '일요일' in text:
-                result['expected_date'] = (next_monday + timedelta(days=6)).strftime('%Y-%m-%d')
-            else:
-                # 요일 지정 없으면 다음주 월요일
+            weekday_offsets = {
+                '월요일': 0,
+                '화요일': 1, 
+                '수요일': 2,
+                '목요일': 3,
+                '금요일': 4,
+                '토요일': 5,
+                '일요일': 6
+            }
+            
+            # 요일 찾기
+            target_date = None
+            for day_name, offset in weekday_offsets.items():
+                if day_name in text:
+                    target_date = next_monday + timedelta(days=offset)
+                    result['expected_date'] = target_date.strftime('%Y-%m-%d')
+                    break
+            
+            # 요일이 명시되지 않은 경우 다음주 월요일
+            if not target_date:
                 result['expected_date'] = next_monday.strftime('%Y-%m-%d')
         
         # 이번주 + 요일 패턴
